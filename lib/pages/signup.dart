@@ -226,7 +226,7 @@ class _SignupPageState extends State<SignupPage> {
             duration: Duration(seconds: 4),
           ),
         );
-        Navigator.pushReplacementNamed(context, '/age');
+        Navigator.pushReplacementNamed(context, '/cover');
       }
     } catch (error) {
       final errorMessage = error.toString();
@@ -248,6 +248,7 @@ class _SignupPageState extends State<SignupPage> {
           );
         }
       }
+      
     } finally {
       if (mounted) {
         setState(() {

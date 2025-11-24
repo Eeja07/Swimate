@@ -65,10 +65,10 @@ class _HistoryPageState extends State<HistoryPage> {
         },
       ),
       bottomNavigationBar: FloatingBottomBar(
-        currentIndex: 1,
+        currentIndex: 2,
         onTap: (index) {
           if (index == 0) Navigator.pushReplacementNamed(context, '/dashboard');
-          if (index == 2) Navigator.pushReplacementNamed(context, '/history');
+          if (index == 1) Navigator.pushReplacementNamed(context, '/record');
         },
         isSmall: false, // << bar jadi kecil di RecordPage
 
