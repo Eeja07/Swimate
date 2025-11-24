@@ -2,6 +2,11 @@ import 'package:flutter/material.dart';
 import '../widgets/floating_bottom_bar.dart';
 import '../widgets/custom_navbar.dart';
 import 'dart:async';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'confirm_activity.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'package:geolocator/geolocator.dart';
+import 'dart:math' as math;
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -17,24 +22,69 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   int seconds = 0;
   Timer? _timer;
 
-  double pace = 0.0;
+  // Sensor recording
+  StreamSubscription<AccelerometerEvent>? _accelSub;
+  StreamSubscription<GyroscopeEvent>? _gyroSub;
+  AccelerometerEvent? _lastAccel;
+  GyroscopeEvent? _lastGyro;
+  Timer? _sensorTimer;
+  final List<Map<String, dynamic>> _sensorSamples = [];
+
+  // stroke count (detected from accelerometer peaks)
+  int strokes = 0;
+  // distance in meters (updated from GPS)
   double distance = 0.0;
+
+  // GPS
+  StreamSubscription<Position>? _positionSub;
+  Position? _lastPosition;
+
+  // stroke detection helpers
+  double _lastAccelMag = 0.0;
+  int _lastStrokeTime = 0; // epoch ms
 
   late AnimationController _animController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
 
+  // GPS UI status
+  String _gpsStatus = 'Unknown'; // Unknown, Searching, Locked, Disabled, Denied
+
+  Future<void> _updateGpsStatus() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      LocationPermission permission = await Geolocator.checkPermission();
+
+      String newStatus = 'Unknown';
+      if (!serviceEnabled) {
+        newStatus = 'Disabled';
+      } else if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        newStatus = 'Denied';
+      } else if (_lastPosition == null) {
+        newStatus = 'Searching';
+      } else {
+        newStatus = 'Locked';
+      }
+
+      if (mounted) setState(() => _gpsStatus = newStatus);
+    } catch (e) {
+      debugPrint('Error checking GPS status: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _updateGpsStatus();
 
     _animController = AnimationController(
       duration: const Duration(milliseconds: 500),
       vsync: this, // This now works because of the TickerProviderStateMixin
     );
 
-    _slideAnimation =
-        Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+        .animate(
           CurvedAnimation(parent: _animController, curve: Curves.easeOutQuad),
         );
 
@@ -50,6 +100,10 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   void dispose() {
     _animController.dispose();
     _timer?.cancel(); // FIX: Added timer disposal to prevent memory leaks.
+    _sensorTimer?.cancel();
+    _accelSub?.cancel();
+    _gyroSub?.cancel();
+    _positionSub?.cancel();
     super.dispose();
   }
 
@@ -59,15 +113,112 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       isRecording = true;
       isPaused = false;
     });
-
+    // start main timer
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) { // Good practice to check if widget is still in tree
+      if (mounted) {
         setState(() {
           seconds++;
-          distance += 0.5; // simulasi jarak
-          pace = seconds > 0 ? distance / (seconds / 60) : 0; // pace per menit
+          // distance updated by GPS stream; fallback simulation if no GPS
+          if (_lastPosition == null) distance += 0.5;
         });
       }
+    });
+
+    // clear previous sensor samples
+    _sensorSamples.clear();
+
+    // subscribe to sensor streams and keep last values
+    _accelSub = accelerometerEvents.listen((event) {
+      _lastAccel = event;
+    });
+
+    _gyroSub = gyroscopeEvents.listen((event) {
+      _lastGyro = event;
+    });
+
+    // start GPS stream (request permission if needed) and seed initial position
+    Future.microtask(() async {
+      // update status before requesting/starting stream
+      _updateGpsStatus();
+      try {
+        LocationPermission permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+        if (permission == LocationPermission.deniedForever ||
+            permission == LocationPermission.denied) {
+          // permission denied — keep using simulated distance
+          return;
+        }
+
+        // seed last position immediately so we can compute real delta from the first GPS reading
+        try {
+          final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.best,
+          );
+          _lastPosition = pos;
+        } catch (e) {
+          // ignore getCurrentPosition failures, stream will provide updates
+        }
+
+        _positionSub =
+            Geolocator.getPositionStream(
+              locationSettings: const LocationSettings(
+                accuracy: LocationAccuracy.best,
+                distanceFilter: 1,
+              ),
+            ).listen((pos) {
+              if (_lastPosition != null) {
+                final d = Geolocator.distanceBetween(
+                  _lastPosition!.latitude,
+                  _lastPosition!.longitude,
+                  pos.latitude,
+                  pos.longitude,
+                );
+                if (d.isFinite && d > 0) {
+                  if (mounted) setState(() => distance += d);
+                }
+              }
+              _lastPosition = pos;
+            });
+      } catch (e) {
+        // any geolocator error -> fallback to simulated distance
+        debugPrint('Geolocator error: $e');
+      }
+    });
+
+    // sample combined sensor values at a fixed interval (e.g., 50ms)
+    _sensorTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final ax = _lastAccel?.x ?? 0.0;
+      final ay = _lastAccel?.y ?? 0.0;
+      final az = _lastAccel?.z ?? 0.0;
+      final gx = _lastGyro?.x ?? 0.0;
+      final gy = _lastGyro?.y ?? 0.0;
+      final gz = _lastGyro?.z ?? 0.0;
+
+      final mag = math.sqrt(ax * ax + ay * ay + az * az);
+
+      // simple stroke detection: detect peak crossing above threshold and debounce
+      const double threshold = 15.4; // tune this value
+      if (mag > threshold &&
+          _lastAccelMag <= threshold &&
+          (now - _lastStrokeTime) > 400) {
+        strokes++;
+        _lastStrokeTime = now;
+      }
+
+      _lastAccelMag = mag;
+
+      _sensorSamples.add({
+        't': now,
+        'ax': ax,
+        'ay': ay,
+        'az': az,
+        'gx': gx,
+        'gy': gy,
+        'gz': gz,
+      });
     });
   }
 
@@ -75,24 +226,102 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   void _pauseRecording() {
     setState(() => isPaused = true);
     _timer?.cancel();
+    // pause sensor subscriptions/sampling
+    _sensorTimer?.cancel();
+    _accelSub?.pause();
+    _gyroSub?.pause();
+    _positionSub?.pause();
   }
 
   // ▶️ Resume stopwatch
   void _resumeRecording() {
     setState(() => isPaused = false);
-    _startRecording(); // Re-using _startRecording logic is cleaner
+    // resume timers and sensor sampling
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        setState(() {
+          seconds++;
+          // distance updated by GPS; keep fallback
+          if (_lastPosition == null) distance += 0.5;
+        });
+      }
+    });
+
+    _accelSub?.resume();
+    _gyroSub?.resume();
+    _positionSub?.resume();
+
+    _sensorTimer ??= Timer.periodic(const Duration(milliseconds: 50), (_) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final ax = _lastAccel?.x ?? 0.0;
+      final ay = _lastAccel?.y ?? 0.0;
+      final az = _lastAccel?.z ?? 0.0;
+      final gx = _lastGyro?.x ?? 0.0;
+      final gy = _lastGyro?.y ?? 0.0;
+      final gz = _lastGyro?.z ?? 0.0;
+
+      final mag = math.sqrt(ax * ax + ay * ay + az * az);
+
+      const double threshold = 12.0;
+      if (mag > threshold &&
+          _lastAccelMag <= threshold &&
+          (now - _lastStrokeTime) > 400) {
+        strokes++;
+        _lastStrokeTime = now;
+      }
+
+      _lastAccelMag = mag;
+
+      _sensorSamples.add({
+        't': now,
+        'ax': ax,
+        'ay': ay,
+        'az': az,
+        'gx': gx,
+        'gy': gy,
+        'gz': gz,
+      });
+    });
   }
 
   // ⏹️ Stop recording
   void _stopRecording() {
+    // stop timers and sensor subscriptions
     _timer?.cancel();
+    _sensorTimer?.cancel();
+    _accelSub?.cancel();
+    _gyroSub?.cancel();
+    _positionSub?.cancel();
+
+    final recordedSeconds = seconds;
+    final recordedDistance = distance;
+    final recordedStrokes = strokes;
+    final recordedSensors = List<Map<String, dynamic>>.from(_sensorSamples);
+
     setState(() {
       isRecording = false;
       isPaused = false;
       seconds = 0;
-      pace = 0.0;
+      strokes = 0;
       distance = 0.0;
+      _sensorSamples.clear();
+      _lastPosition = null;
     });
+
+    // Navigate to confirm activity page with recorded data and sensors
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ConfirmActivityPage(
+            durationSeconds: recordedSeconds,
+            distance: recordedDistance,
+            strokes: recordedStrokes,
+            sensorData: recordedSensors,
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -126,7 +355,10 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
                       // ⏱️ MENIT
                       _timeRow(
-                        value: ((seconds % 3600) ~/ 60).toString().padLeft(1, '0'),
+                        value: ((seconds % 3600) ~/ 60).toString().padLeft(
+                          1,
+                          '0',
+                        ),
                         unit: 'm',
                         valueColor: const Color(0xFF006AFF),
                         unitColor: const Color(0xFFFF5500),
@@ -169,7 +401,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
                           Column(
                             children: [
                               Text(
-                                "${pace.toStringAsFixed(1)} m/min",
+                                "${strokes}",
                                 style: const TextStyle(
                                   color: Color(0xFFF1DF4D),
                                   fontSize: 22,
@@ -178,7 +410,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
                               ),
                               const SizedBox(height: 4),
                               const Text(
-                                "Pace",
+                                "Strokes",
                                 style: TextStyle(
                                   color: Color(0xFF3A3B3C),
                                   fontSize: 14,
@@ -196,6 +428,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
                 // 🟢 Tombol aksi utama
                 _buildMainButton(),
+
+                // Spacer so the main button doesn't overlap the bottom bar
+                SizedBox(height: MediaQuery.of(context).padding.bottom + 60),
               ],
             ),
           ),
@@ -210,7 +445,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           if (index == 2) Navigator.pushReplacementNamed(context, '/history');
         },
         isSmall: true, // << bar jadi kecil di RecordPage
-
       ),
     );
   }
@@ -312,7 +546,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     );
   }
 }
-
 
 Widget _timeRow({
   required String value,

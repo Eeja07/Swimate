@@ -194,6 +194,8 @@ class _SigninPageState extends State<SigninPage> {
     }
   }
 
+  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -334,6 +336,25 @@ class _SigninPageState extends State<SigninPage> {
                               },
                             ),
                           ),
+
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: _isLoading
+                                  ? null
+                                  : () {
+                                      Navigator.pushNamed(context, '/reset-password');
+                                    },
+                              child: const Text(
+                                'Forgot password?',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ),
+                          ),
                           const SizedBox(height: 32),
                           SizedBox(
                             width: double.infinity,
@@ -370,6 +391,9 @@ class _SigninPageState extends State<SigninPage> {
                           ),
 
                           const SizedBox(height: 20),
+
+                          // Forgot password button
+                          
 
                           // Sign In Link
                           Row(

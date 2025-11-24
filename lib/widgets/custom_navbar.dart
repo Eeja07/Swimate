@@ -63,7 +63,9 @@ class CustomNavbar extends StatelessWidget implements PreferredSizeWidget {
                 icon: const Icon(Icons.notifications, size: 30, color: Colors.white),
               ),
               GestureDetector(
-                onTap: () {},
+                onTap: () {
+                  Navigator.pushNamed(context, '/profile');
+                },
                 child: const ClipOval(
                   child: Icon(Icons.account_circle, size: 30, color: Colors.white),
                 ),
