@@ -1,0 +1,83 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.Python
+pythonenv*
+
+# ---- Virtual Environment ----
+venv/
+env/
+.venv/
+
+# ---- IDE / Editor ----
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# ---- Logs ----
+*.log
+logs/
+wandb/
+mlruns/
+
+# ---- Notebooks ----
+*.ipynb_checkpoints/
+.ipynb_checkpoints/
+
+# ---- Data ----
+*.csv
+*.tsv
+*.json
+*.xlsx
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.tfrecord
+*.pt
+*.pth
+dataset/
+data/
+
+# ---- Models ----
+models/
+*.h5
+*.keras
+*.tflite
+*.onnx
+*.pt
+*.pth
+
+# ---- Temporary Files ----
+*.tmp
+*.temp
+*.bak
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+
+# ---- TensorFlow / Keras ----
+checkpoints/
+tensorboard/
+saved_model/
+
+# ---- Cache ----
+cache/
+.cache/
+*.cache
+
+# ---- Build ----
+build/
+dist/
+*.egg-info
+
+# ---- Jupyter ----
+.jupyter/
