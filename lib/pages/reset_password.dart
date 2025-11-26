@@ -178,7 +178,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                                 hintText: 'Email',
                                 prefixIcon: Icon(Icons.email, color: Colors.grey[700]),
                                 filled: true,
-                                fillColor: Colors.white.withOpacity(0.85),
+                                fillColor: Colors.white,
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(22),
                                   borderSide: BorderSide.none,
