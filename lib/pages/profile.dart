@@ -4,6 +4,8 @@ import 'package:iconify_flutter/iconify_flutter.dart';
 import 'package:iconify_flutter/icons/fa_solid.dart';
 import 'package:iconify_flutter/icons/ep.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/height_picker_dialog.dart';
+import '../widgets/weight_picker_dialog.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -90,8 +92,8 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() => _saving = true);
 
     final int? age = int.tryParse(_ageController.text.trim());
-    final double? height = double.tryParse(_heightController.text.trim());
-    final double? weight = double.tryParse(_weightController.text.trim());
+    final int? height = int.tryParse(_heightController.text.trim());  
+    final int? weight = int.tryParse(_weightController.text.trim());
 
     final payload = {
       'name': _nameController.text.trim(),
@@ -99,7 +101,6 @@ class _ProfilePageState extends State<ProfilePage> {
       'age': age ?? 0,
       'height': height ?? 0,
       'weight': weight ?? 0,
-      'updated_at': DateTime.now().toIso8601String(),
     };
 
     try {
@@ -197,6 +198,7 @@ class _ProfilePageState extends State<ProfilePage> {
                               ),
                             ),
                           ),
+                          
                           const SizedBox(height: 16),
                           _buildTextField('Name', Icons.person, _nameController),
                           const SizedBox(height: 12),
@@ -204,10 +206,74 @@ class _ProfilePageState extends State<ProfilePage> {
                           const SizedBox(height: 12),
                           _buildTextField('Age', Icons.cake, _ageController, keyboardType: TextInputType.number),
                           const SizedBox(height: 12),
-                          _buildTextField('Height (cm)', Icons.height, _heightController, keyboardType: TextInputType.number),
-                          const SizedBox(height: 12),
-                          _buildTextField('Weight (kg)', Icons.monitor_weight, _weightController, keyboardType: TextInputType.number),
-                          const SizedBox(height: 20),
+                          _buildTextField(
+  'Height (cm)',
+  Icons.height,
+  _heightController,
+  disableKeyboard: true,
+  keyboardType: TextInputType.number,
+  suffix: IconButton(
+    icon: const Icon(Icons.edit, color: Colors.black87),
+    onPressed: () {
+      final double currentHeight = double.tryParse(_heightController.text) ?? 0;
+
+      showDialog(
+        context: context,
+        builder: (_) => HeightPickerDialog(
+          initialHeight: currentHeight.toInt(),
+          onSave: (newHeight) async {
+            final user = supabase.auth.currentUser;
+            if (user == null) return;
+
+            await supabase
+                .from('profiles')
+                .update({'height': newHeight})
+                .eq('id', user.id);
+
+            setState(() {
+              _heightController.text = newHeight.toString();
+            });
+          },
+        ),
+      );
+    },
+  ),
+),
+
+                         _buildTextField(
+  'Weight (kg)',
+  Icons.monitor_weight,
+  _weightController,
+  disableKeyboard: true,
+  keyboardType: TextInputType.number,
+  suffix: IconButton(
+    icon: const Icon(Icons.edit, color: Colors.black87),
+    onPressed: () {
+      final double currentWeight = double.tryParse(_weightController.text) ?? 0;
+
+      showDialog(
+        context: context,
+        builder: (_) => WeightPickerDialog(
+          initialWeight: currentWeight.toInt(),
+          onSave: (newWeight) async {
+            final user = supabase.auth.currentUser;
+            if (user == null) return;
+
+            await supabase
+                .from('profiles')
+                .update({'weight': newWeight})
+                .eq('id', user.id);
+
+            setState(() {
+              _weightController.text = newWeight.toString();
+            });
+          },
+        ),
+      );
+    },
+  ),
+),
+
                           ElevatedButton(
                             onPressed: _saving ? null : _saveProfile,
                             style: ElevatedButton.styleFrom(
@@ -233,19 +299,31 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildTextField(String hint, IconData icon, TextEditingController controller,
-      {bool readOnly = false, TextInputType keyboardType = TextInputType.text}) {
-    return TextField(
-      controller: controller,
-      readOnly: readOnly,
-      keyboardType: keyboardType,
-      decoration: InputDecoration(
-        hintText: hint,
-        prefixIcon: Icon(icon, color: Colors.grey[700]),
-        filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.85),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+  Widget _buildTextField(
+  String hint,
+  IconData icon,
+  TextEditingController controller, {
+  bool readOnly = false,
+  bool disableKeyboard = false,
+  TextInputType keyboardType = TextInputType.text,
+  Widget? suffix,
+}) {
+  return TextField(
+    controller: controller,
+    readOnly: readOnly || disableKeyboard,
+    keyboardType: disableKeyboard ? TextInputType.none : keyboardType,
+    onTap: disableKeyboard ? () {} : null,  // <-- cegah keyboard
+    decoration: InputDecoration(
+      hintText: hint,
+      prefixIcon: Icon(icon, color: Colors.grey[700]),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.85),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
       ),
-    );
-  }
+    ),
+  );
+}
 }

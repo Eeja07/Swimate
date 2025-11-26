@@ -16,6 +16,7 @@ import 'pages/style_page.dart';
 import 'pages/profile.dart';
 import 'pages/confirm_activity.dart';
 import 'pages/reset_password.dart';
+import 'pages/history_detail.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,7 +66,7 @@ class _SwimateAppState extends State<SwimateApp> {
         case AuthChangeEvent.signedIn:
           if (session?.user != null) {
             debugPrint('👤 User signed in: ${session!.user.email}');
-            
+
             // 🔍 Cek apakah user baru
             final isNewUser = await _isNewUser(session.user.id);
 
@@ -99,7 +100,7 @@ class _SwimateAppState extends State<SwimateApp> {
   Future<bool> _isNewUser(String userId) async {
     try {
       debugPrint('🔍 Checking if user is new: $userId');
-      
+
       final response = await Supabase.instance.client
           .from('profiles')
           .select('age, height, weight')
@@ -119,9 +120,8 @@ class _SwimateAppState extends State<SwimateApp> {
 
       final isNew = (age == 0 && height == 0 && weight == 0);
       debugPrint(isNew ? 'User is new' : '👴 User is existing');
-      
-      return isNew;
 
+      return isNew;
     } catch (e) {
       debugPrint('❌ Error checking profile: $e');
       return true;
@@ -145,7 +145,7 @@ class _SwimateAppState extends State<SwimateApp> {
 
       onGenerateRoute: (settings) {
         debugPrint(' Navigating to: ${settings.name}');
-        
+
         WidgetBuilder builder;
         switch (settings.name) {
           case '/profile':
@@ -176,7 +176,11 @@ class _SwimateAppState extends State<SwimateApp> {
             builder = (context) => const RecordPage();
             break;
           case '/confirm_activity':
-            builder = (context) => const ConfirmActivityPage(durationSeconds: 0, distance: 0.0, strokes: 0);
+            builder = (context) => const ConfirmActivityPage(
+              durationSeconds: 0,
+              distance: 0.0,
+              strokes: 0,
+            );
             break;
           case '/reset-password':
             builder = (context) => const ResetPasswordPage();
@@ -189,6 +193,9 @@ class _SwimateAppState extends State<SwimateApp> {
             break;
           case '/collection':
             builder = (context) => const CollectionPage();
+            break;
+          case '/history-detail':
+            builder = (context) => const HistoryDetailPage();
             break;
           default:
             builder = (context) => const CoverPage();
