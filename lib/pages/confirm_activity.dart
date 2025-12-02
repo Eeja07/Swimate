@@ -3,6 +3,17 @@ import 'package:iconify_flutter/iconify_flutter.dart';
 import 'package:iconify_flutter/icons/fa_solid.dart';
 import 'package:iconify_flutter/icons/ep.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/animated_result_dialog.dart'; 
+// Import RecordPage jika Anda ingin menggunakan Navigator.pushReplacement
+// import 'record_page.dart';
+
+// --- Konstanta Warna ---
+const Color primaryColor = Color(0xFF1976D2);
+const Color lightTextColor = Colors.white;
+const Color accentColor = Color(0xFF4FC3F7);
+const Color darkOverlayColor = Color(0xB3000000);
+const Color cardBgColor = Color(0xCC1E1E1E);
+const Color fieldFillColor = Color(0xDDFFFFFF);
 
 class ConfirmActivityPage extends StatefulWidget {
   final int durationSeconds;
@@ -45,8 +56,8 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     final m = (seconds % 3600) ~/ 60;
     final s = seconds % 60;
     if (h > 0) return '${h}h ${m}m ${s}s';
-    if (m > 0) return '${m}m ${s}s';
-    return '${s}s';
+    if (m > 0) return '${m.toString().padLeft(2, '0')}m ${s.toString().padLeft(2, '0')}s';
+    return '${s.toString().padLeft(2, '0')}s';
   }
 
   Future<void> _submit() async {
@@ -55,39 +66,44 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Not authenticated'))
+          await AnimatedResultDialog.show(
+            context: context,
+            isSuccess: false,
+            title: 'Authentication Required',
+            message: 'Please sign in to continue',
+            onClose: () {
+              Navigator.pushReplacementNamed(context, '/signin');
+            },
           );
-          Navigator.pushReplacementNamed(context, '/signin');
-        }
         return;
       }
 
       final now = DateTime.now();
       final startTime = now.subtract(Duration(seconds: widget.durationSeconds));
 
-      // Format INTERVAL untuk PostgreSQL (HH:MM:SS)
       final totalTimeInterval = _formatInterval(widget.durationSeconds);
       final paceInterval = _calculatePaceInterval();
 
-      // 1. Insert ke tabel activity_table
+      final primaryStyle = widget.segments != null
+          ? _determinePrimaryStyle()
+          : 'freestyle';
+
       final activityPayload = {
         'id_user': user.id,
-        'total_distance': widget.distance.round(), // INT8
-        'total_time': totalTimeInterval, // INTERVAL as 'HH:MM:SS'
-        'swimming_style': _determinePrimaryStyle(), // TEXT
-        'confidence': 0.85, // NUMERIC (double)
-        'calories': _calculateCalories(), // INT8
-        'timestamp': now.toIso8601String(), // TIMESTAMPTZ
-        'start_time': startTime.toIso8601String(), // TIMESTAMPTZ
-        'end_time': now.toIso8601String(), // TIMESTAMPTZ
-        'total_strokes': widget.strokes, // INT8
-        'pace': paceInterval, // INTERVAL as 'HH:MM:SS'
-        'activity_title': _titleController.text.trim(), // TEXT
-        'activity_notes': _notesController.text.trim().isEmpty 
-            ? null 
-            : _notesController.text.trim(), // TEXT (nullable)
+        'total_distance': widget.distance.round(),
+        'total_time': totalTimeInterval,
+        'swimming_style': primaryStyle,
+        'confidence': 0.85,
+        'calories': _calculateCalories(),
+        'timestamp': now.toIso8601String(),
+        'start_time': startTime.toIso8601String(),
+        'end_time': now.toIso8601String(),
+        'total_strokes': widget.strokes,
+        'pace': paceInterval,
+        'activity_title': _titleController.text.trim(),
+        'activity_notes': _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
       };
 
       final activityResponse = await supabase
@@ -98,22 +114,31 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
 
       final activityId = activityResponse['id_activity'] as String;
 
-      // 2. Insert segments ke tabel activity_segments
       if (widget.segments != null && widget.segments!.isNotEmpty) {
         await _insertSegments(activityId);
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Activity submitted successfully!'))
+        await AnimatedResultDialog.show(
+          context: context,
+          isSuccess: true,
+          title: 'Success!',
+          message: 'Activity submitted successfully!',
+          autoCloseDuration: const Duration(seconds: 2),
+          onClose: () {
+            Navigator.pushReplacementNamed(context, '/dashboard');
+          },
         );
-        Navigator.pushReplacementNamed(context, '/dashboard');
       }
     } catch (e, st) {
       debugPrint('Error submitting activity: $e\n$st');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'))
+        await AnimatedResultDialog.show(
+          context: context,
+          isSuccess: false,
+          title: 'Error',
+          message: 'Failed to submit activity. Please try again.',
+          autoCloseDuration: const Duration(seconds: 3),
         );
       }
     } finally {
@@ -123,42 +148,39 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
 
   Future<void> _insertSegments(String activityId) async {
     final segmentsList = <Map<String, dynamic>>[];
-    
+
     int totalDistance = 0;
     int totalStrokes = 0;
-    
+
     for (var i = 0; i < widget.segments!.length; i++) {
       final segment = widget.segments![i];
       final segmentDuration = segment['duration'] as int;
-      
-      // Hitung proporsi distance dan strokes untuk segment ini
+
       final distanceProportion = segmentDuration / widget.durationSeconds;
       final segmentDistance = (widget.distance * distanceProportion).round();
       final segmentStrokes = (widget.strokes * distanceProportion).round();
-      
+
       totalDistance += segmentDistance;
       totalStrokes += segmentStrokes;
-      
-      // Adjust terakhir jika ada selisih pembulatan
+
       final isLastSegment = i == widget.segments!.length - 1;
-      final adjustedDistance = isLastSegment 
+      final adjustedDistance = isLastSegment
           ? segmentDistance + (widget.distance.round() - totalDistance)
           : segmentDistance;
       final adjustedStrokes = isLastSegment
           ? segmentStrokes + (widget.strokes - totalStrokes)
           : segmentStrokes;
 
-      // Format segment_time sebagai INTERVAL (HH:MM:SS)
       final segmentTimeInterval = _formatInterval(segmentDuration);
 
       segmentsList.add({
-        'id_activity': activityId, // UUID
-        'seq': i + 1, // INT4
-        'style': segment['style'], // TEXT
-        'distance': adjustedDistance, // INT8
-        'strokes': adjustedStrokes, // INT8
-        'segment_time': segmentTimeInterval, // INTERVAL as 'HH:MM:SS'
-        'created_at': DateTime.now().toIso8601String(), // TIMESTAMPTZ
+        'id_activity': activityId,
+        'seq': i + 1,
+        'style': segment['style'],
+        'distance': adjustedDistance,
+        'strokes': adjustedStrokes,
+        'segment_time': segmentTimeInterval,
+        'created_at': DateTime.now().toIso8601String(),
       });
     }
 
@@ -167,15 +189,14 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     }
   }
 
-  // Format durasi dalam detik ke PostgreSQL INTERVAL format (HH:MM:SS)
   String _formatInterval(int seconds) {
     final hours = seconds ~/ 3600;
     final minutes = (seconds % 3600) ~/ 60;
     final secs = seconds % 60;
-    
+
     return '${hours.toString().padLeft(2, '0')}:'
-           '${minutes.toString().padLeft(2, '0')}:'
-           '${secs.toString().padLeft(2, '0')}';
+        '${minutes.toString().padLeft(2, '0')}:'
+        '${secs.toString().padLeft(2, '0')}';
   }
 
   String _determinePrimaryStyle() {
@@ -183,252 +204,266 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
       return 'freestyle';
     }
 
-    // Jika ada lebih dari 1 style berbeda, return "Mixed"
     final uniqueStyles = widget.segments!.map((s) => s['style'] as String).toSet();
     if (uniqueStyles.length > 1) {
       return 'Mixed';
     }
 
-    // Jika hanya 1 style, return style tersebut
     return uniqueStyles.first;
   }
 
   int _calculateCalories() {
-    // Formula sederhana: durasi (menit) * 11 kalori/menit (rata-rata swimming)
     final minutes = widget.durationSeconds / 60;
     return (minutes * 11).round();
   }
 
   String _calculatePaceInterval() {
-    // Pace dalam format INTERVAL "HH:MM:SS" per 100m
     if (widget.distance <= 0) return "00:00:00";
-    
+
     final secondsPer100m = (widget.durationSeconds / widget.distance) * 100;
     final hours = (secondsPer100m ~/ 3600);
     final minutes = ((secondsPer100m % 3600) ~/ 60);
     final seconds = (secondsPer100m % 60).round();
-    
+
     return '${hours.toString().padLeft(2, '0')}:'
-           '${minutes.toString().padLeft(2, '0')}:'
-           '${seconds.toString().padLeft(2, '0')}';
+        '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black, // Set background
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
+          // Navigasi Back Button AppBar mengikuti Cancel Button
+          onTap: _submitting ? null : () => Navigator.pushReplacementNamed(context, '/record'),
           child: const Padding(
             padding: EdgeInsets.all(12.0),
-            child: Iconify(Ep.arrow_left_bold, color: Colors.white, size: 26),
+            child: Iconify(Ep.arrow_left_bold, color: lightTextColor, size: 26),
           ),
         ),
-        title: const Text('Confirm Activity'),
+        title: const Text('Confirm Activity', style: TextStyle(color: lightTextColor)),
         centerTitle: true,
       ),
       extendBodyBehindAppBar: true,
-      body: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/image/signup.jpg'),
-            fit: BoxFit.cover,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0x80000000),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 8),
-                  Center(
-                    child: CircleAvatar(
-                      radius: 44,
-                      backgroundColor: Colors.white24,
-                      child: const Iconify(
-                        FaSolid.swimmer,
-                        color: Colors.white,
-                        size: 40,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _titleController,
-                    decoration: InputDecoration(
-                      hintText: 'Title',
-                      prefixIcon: Icon(Icons.edit, color: Colors.grey[700]),
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.9),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Duration',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _formatDuration(widget.durationSeconds),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Distance',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '${widget.distance.toStringAsFixed(1)} m',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Strokes',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '${widget.strokes}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  
-                  // Tampilkan segments jika ada
-                  if (widget.segments != null && widget.segments!.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Swimming Styles',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...widget.segments!.map((segment) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            segment['style'].toString().toUpperCase(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            _formatDuration(segment['duration'] as int),
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    )),
-                  ],
-                  
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _notesController,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: 'Notes (optional)',
-                      prefixIcon: Icon(Icons.note, color: Colors.grey[700]),
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.9),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: _submitting ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1976D2),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _submitting
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Submit',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _submitting
-                        ? null
-                        : () => Navigator.pop(context),
-                    child: const Text(
-                      'Cancel',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ],
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/image/signup.jpg'),
+                fit: BoxFit.cover,
               ),
             ),
           ),
-        ),
+          // Overlay gelap untuk keterbacaan
+          Container(
+            color: darkOverlayColor,
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                // Card background gelap
+                decoration: BoxDecoration(
+                  color: cardBgColor,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    // Shadow yang lebih menonjol
+                    BoxShadow(
+                      color: primaryColor.withValues(alpha: 0.3),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 8),
+                    Center(
+                      child: CircleAvatar(
+                        radius: 50,
+                        backgroundColor: primaryColor.withValues(alpha: 0.2),
+                        child: const Iconify(
+                          FaSolid.swimmer,
+                          color: primaryColor,
+                          size: 50,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+
+                    // TextField Title
+                    TextField(
+                      controller: _titleController,
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: InputDecoration(
+                        hintText: 'Title (ex: Training Endurance)',
+                        hintStyle: TextStyle(color: Colors.grey[600]),
+                        prefixIcon: const Icon(Icons.title, color: primaryColor),
+                        filled: true,
+                        fillColor: fieldFillColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: primaryColor, width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Stats Row
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildStatColumn('Duration', _formatDuration(widget.durationSeconds)),
+                        _buildStatColumn('Distance', '${widget.distance.toStringAsFixed(0)} m'),
+                        _buildStatColumn('Strokes', '${widget.strokes}'),
+                      ],
+                    ),
+
+                    // Segments (Hanya ditampilkan jika ada)
+                    if (widget.segments != null && widget.segments!.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Swimming Segments',
+                        style: TextStyle(
+                          color: lightTextColor,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ...widget.segments!.map((segment) => Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
+                        decoration: BoxDecoration(
+                          color: primaryColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              (segment['style'].toString().toUpperCase()),
+                              style: const TextStyle(
+                                color: lightTextColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              _formatDuration(segment['duration'] as int),
+                              style: const TextStyle(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      )),
+                    ],
+
+                    const SizedBox(height: 24),
+
+                    // Notes Field
+                    TextField(
+                      controller: _notesController,
+                      maxLines: 4,
+                      style: const TextStyle(color: Colors.black87),
+                      decoration: InputDecoration(
+                        hintText: 'Notes (optional)',
+                        hintStyle: TextStyle(color: Colors.grey[600]),
+                        prefixIcon: const Icon(Icons.note, color: primaryColor),
+                        filled: true,
+                        fillColor: fieldFillColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: primaryColor, width: 2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+
+                    // Tombol Submit
+                    ElevatedButton(
+                      onPressed: _submitting ? null : _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryColor,
+                        disabledBackgroundColor: primaryColor.withValues(alpha: 0.5),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 5,
+                      ),
+                      child: _submitting
+                          ? const SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(
+                          color: lightTextColor,
+                          strokeWidth: 3,
+                        ),
+                      )
+                          : const Text(
+                        'Submit',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: lightTextColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      // PERUBAHAN: Menggunakan pushReplacementNamed untuk mengarahkan ke /record
+                      onPressed: _submitting ? null : () => Navigator.pushReplacementNamed(context, '/record'),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: lightTextColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  // Widget pembantu untuk Stat Column
+  Widget _buildStatColumn(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: const TextStyle(
+            color: lightTextColor,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     );
   }
 }

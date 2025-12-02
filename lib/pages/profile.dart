@@ -7,6 +7,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/height_picker_dialog.dart';
 import '../widgets/weight_picker_dialog.dart';
 
+// --- Konstanta Warna ---
+const Color primaryColor = Color(0xFF1976D2); // Biru yang sudah ada
+const Color accentColor = Color(0xFF4FC3F7); // Biru muda untuk highlight
+const Color darkOverlayColor = Color(0xB3000000); // 70% opacity hitam untuk overlay
+const Color lightTextColor = Colors.white; // Warna Putih (sesuai permintaan)
+const Color fieldFillColor = Color(0xDDFFFFFF); // Putih dengan opasitas tinggi untuk input
+
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -92,15 +99,15 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() => _saving = true);
 
     final int? age = int.tryParse(_ageController.text.trim());
-    final int? height = int.tryParse(_heightController.text.trim());  
+    final int? height = int.tryParse(_heightController.text.trim());
     final int? weight = int.tryParse(_weightController.text.trim());
 
     final payload = {
       'name': _nameController.text.trim(),
       'email': _emailController.text.trim(),
-      'age': age ?? 0,
-      'height': height ?? 0,
-      'weight': weight ?? 0,
+      'age': age,
+      'height': height,
+      'weight': weight,
     };
 
     try {
@@ -142,6 +149,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -149,15 +157,16 @@ class _ProfilePageState extends State<ProfilePage> {
           onTap: () => Navigator.pop(context),
           child: const Padding(
             padding: EdgeInsets.all(12.0),
-            child: Iconify(Ep.arrow_left_bold, color: Colors.white, size: 26),
+            child: Iconify(Ep.arrow_left_bold, color: lightTextColor, size: 26),
           ),
         ),
-        title: const Text('Profile'),
+        // PERUBAHAN: Teks 'Profile' dibuat warna putih
+        title: const Text('Profile', style: TextStyle(color: lightTextColor)),
         centerTitle: true,
         actions: [
           TextButton(
             onPressed: _signOut,
-            child: const Text('Sign Out', style: TextStyle(color: Colors.white)),
+            child: const Text('Sign Out', style: TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
           )
         ],
       ),
@@ -172,127 +181,162 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             ),
           ),
+          Container(
+            color: darkOverlayColor,
+          ),
           SafeArea(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? const Center(child: CircularProgressIndicator(color: lightTextColor))
                 : SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: const Color(0x80000000),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const SizedBox(height: 8),
-                          Center(
-                            child: CircleAvatar(
-                              radius: 44,
-                              backgroundColor: Colors.white24,
-                              child: const Iconify(
-                                FaSolid.user,
-                                color: Colors.white,
-                                size: 40,
-                              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC1E1E1E),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          spreadRadius: 0,
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: CircleAvatar(
+                            radius: 50,
+                            backgroundColor: primaryColor.withValues(alpha: 0.2),
+                            child: const Iconify(
+                              FaSolid.user,
+                              color: primaryColor,
+                              size: 50,
                             ),
                           ),
-                          
-                          const SizedBox(height: 16),
-                          _buildTextField('Name', Icons.person, _nameController),
-                          const SizedBox(height: 12),
-                          _buildTextField('Email', Icons.email, _emailController, readOnly: true),
-                          const SizedBox(height: 12),
-                          _buildTextField('Age', Icons.cake, _ageController, keyboardType: TextInputType.number),
-                          const SizedBox(height: 12),
-                          _buildTextField(
-  'Height (cm)',
-  Icons.height,
-  _heightController,
-  disableKeyboard: true,
-  keyboardType: TextInputType.number,
-  suffix: IconButton(
-    icon: const Icon(Icons.edit, color: Colors.black87),
-    onPressed: () {
-      final double currentHeight = double.tryParse(_heightController.text) ?? 0;
+                        ),
 
-      showDialog(
-        context: context,
-        builder: (_) => HeightPickerDialog(
-          initialHeight: currentHeight.toInt(),
-          onSave: (newHeight) async {
-            final user = supabase.auth.currentUser;
-            if (user == null) return;
+                        const SizedBox(height: 30),
 
-            await supabase
-                .from('profiles')
-                .update({'height': newHeight})
-                .eq('id', user.id);
+                        _buildTextField('Full Name', Icons.person, _nameController),
+                        const SizedBox(height: 16),
+                        _buildTextField('Email Address', Icons.email, _emailController, readOnly: true),
+                        const SizedBox(height: 16),
+                        _buildTextField('Age (years)', Icons.cake, _ageController, keyboardType: TextInputType.number),
+                        const SizedBox(height: 16),
 
-            setState(() {
-              _heightController.text = newHeight.toString();
-            });
-          },
-        ),
-      );
-    },
-  ),
-),
+                        // Height Picker (dengan tombol Edit/ikon pensil)
+                        _buildTextField(
+                          'Height (cm)',
+                          Icons.height,
+                          _heightController,
+                          disableKeyboard: true,
+                          keyboardType: TextInputType.number,
+                          // TOMBOL EDIT TETAP ADA
+                          suffix: IconButton(
+                            icon: const Icon(Icons.edit, color: primaryColor),
+                            onPressed: () {
+                              final double currentHeight = double.tryParse(_heightController.text) ?? 0;
 
-                         _buildTextField(
-  'Weight (kg)',
-  Icons.monitor_weight,
-  _weightController,
-  disableKeyboard: true,
-  keyboardType: TextInputType.number,
-  suffix: IconButton(
-    icon: const Icon(Icons.edit, color: Colors.black87),
-    onPressed: () {
-      final double currentWeight = double.tryParse(_weightController.text) ?? 0;
+                              showDialog(
+                                context: context,
+                                builder: (_) => HeightPickerDialog(
+                                  initialHeight: currentHeight.toInt(),
+                                  onSave: (newHeight) async {
+                                    final user = supabase.auth.currentUser;
+                                    if (user == null) return;
 
-      showDialog(
-        context: context,
-        builder: (_) => WeightPickerDialog(
-          initialWeight: currentWeight.toInt(),
-          onSave: (newWeight) async {
-            final user = supabase.auth.currentUser;
-            if (user == null) return;
+                                    await supabase
+                                        .from('profiles')
+                                        .update({'height': newHeight})
+                                        .eq('id', user.id);
 
-            await supabase
-                .from('profiles')
-                .update({'weight': newWeight})
-                .eq('id', user.id);
-
-            setState(() {
-              _weightController.text = newWeight.toString();
-            });
-          },
-        ),
-      );
-    },
-  ),
-),
-
-                          ElevatedButton(
-                            onPressed: _saving ? null : _saveProfile,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1976D2),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: _saving
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                  )
-                                : const Text('Save', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                                    setState(() {
+                                      _heightController.text = newHeight.toString();
+                                    });
+                                  },
+                                ),
+                              );
+                            },
                           ),
-                        ],
-                      ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Weight Picker (dengan tombol Edit/ikon pensil)
+                        _buildTextField(
+                          'Weight (kg)',
+                          Icons.monitor_weight,
+                          _weightController,
+                          disableKeyboard: true,
+                          keyboardType: TextInputType.number,
+                          // TOMBOL EDIT TETAP ADA
+                          suffix: IconButton(
+                            icon: const Icon(Icons.edit, color: primaryColor),
+                            onPressed: () {
+                              final double currentWeight = double.tryParse(_weightController.text) ?? 0;
+
+                              showDialog(
+                                context: context,
+                                builder: (_) => WeightPickerDialog(
+                                  initialWeight: currentWeight.toInt(),
+                                  onSave: (newWeight) async {
+                                    final user = supabase.auth.currentUser;
+                                    if (user == null) return;
+
+                                    await supabase
+                                        .from('profiles')
+                                        .update({'weight': newWeight})
+                                        .eq('id', user.id);
+
+                                    setState(() {
+                                      _weightController.text = newWeight.toString();
+                                    });
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+
+                        const SizedBox(height: 30),
+
+                        // Tombol Save
+                        ElevatedButton(
+                          onPressed: _saving ? null : _saveProfile,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            disabledBackgroundColor: primaryColor.withValues(alpha: 0.5),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            elevation: 5,
+                          ),
+                          child: _saving
+                              ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(color: lightTextColor, strokeWidth: 3),
+                          )
+                              : const Text(
+                            'Save Changes',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: lightTextColor, // PERUBAHAN: Teks 'Save' dibuat warna putih
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -300,30 +344,46 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildTextField(
-  String hint,
-  IconData icon,
-  TextEditingController controller, {
-  bool readOnly = false,
-  bool disableKeyboard = false,
-  TextInputType keyboardType = TextInputType.text,
-  Widget? suffix,
-}) {
-  return TextField(
-    controller: controller,
-    readOnly: readOnly || disableKeyboard,
-    keyboardType: disableKeyboard ? TextInputType.none : keyboardType,
-    onTap: disableKeyboard ? () {} : null,  // <-- cegah keyboard
-    decoration: InputDecoration(
-      hintText: hint,
-      prefixIcon: Icon(icon, color: Colors.grey[700]),
-      suffixIcon: suffix,
-      filled: true,
-      fillColor: Colors.white.withValues(alpha: 0.85),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
+      String hint,
+      IconData icon,
+      TextEditingController controller, {
+        bool readOnly = false,
+        bool disableKeyboard = false,
+        TextInputType keyboardType = TextInputType.text,
+        Widget? suffix,
+      }) {
+    final bool isEmailReadOnly = controller == _emailController && readOnly;
+
+    return TextField(
+      controller: controller,
+      readOnly: readOnly || disableKeyboard,
+      keyboardType: disableKeyboard ? TextInputType.none : keyboardType,
+      onTap: disableKeyboard ? () {} : null,
+      style: TextStyle(
+        color: isEmailReadOnly ? Colors.grey[600] : Colors.black87,
+        fontWeight: isEmailReadOnly ? FontWeight.w600 : FontWeight.normal,
       ),
-    ),
-  );
-}
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: isEmailReadOnly ? Colors.grey : Colors.grey[700]),
+        prefixIcon: Icon(icon, color: primaryColor),
+        suffixIcon: suffix,
+        filled: true,
+        fillColor: isEmailReadOnly ? fieldFillColor.withValues(alpha: 0.8) : fieldFillColor,
+        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: primaryColor, width: 2),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
 }

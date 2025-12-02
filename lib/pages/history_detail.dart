@@ -1,12 +1,30 @@
-// pages/history_detail.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
+import '../widgets/custom_navbar.dart';
+import '../widgets/wave_background.dart';
+
+
+class AppBreakpoints {
+  static const double sm = 640;
+  static const double md = 768;
+  static const double lg = 1024;
+  static const double xl = 1280;
+}
+// ----------------------------------------------------------------------------------------
+
+// --- Konstanta Warna Tema ---
+const Color primaryColor = Color(0xFF1976D2);
+const Color accentColor = Color(0xFF4FC3F7);
+const Color lightTextColor = Colors.white;
+const Color darkBgColor = Color(0xFF0A1628);
+const Color cardBgColor = Color(0xFF162B44);
+
 
 class HistoryDetailPage extends StatefulWidget {
   final String? activityId;
-  
+
   const HistoryDetailPage({
     super.key,
     this.activityId,
@@ -19,9 +37,9 @@ class HistoryDetailPage extends StatefulWidget {
 class _HistoryDetailPageState extends State<HistoryDetailPage> {
   final SupabaseClient supabase = Supabase.instance.client;
   final logger = Logger();
-  
+
   String? get currentUserId => supabase.auth.currentUser?.id;
-  
+
   Map<String, dynamic>? activityData;
   List<dynamic> segments = [];
   bool isLoading = true;
@@ -29,7 +47,6 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
   @override
   void initState() {
     super.initState();
-    // Get activityId from arguments if not provided via constructor
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final args = ModalRoute.of(context)?.settings.arguments;
       if (args != null && args is String) {
@@ -41,8 +58,13 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
   }
 
   Future<void> loadActivityData(String activityId) async {
+    if (currentUserId == null) {
+      logger.e('User not authenticated when loading activity data.');
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+
     try {
-      // Load specific activity data by ID
       final activity = await supabase
           .from('activity_table')
           .select()
@@ -50,7 +72,6 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
           .eq('id_user', currentUserId!)
           .single();
 
-      // Load segments for this activity
       final activitySegments = await supabase
           .from('activity_segments')
           .select()
@@ -70,14 +91,29 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
     }
   }
 
+  String _formatTotalTime(String totalTime) {
+    final parts = totalTime.split(':');
+    final h = int.tryParse(parts[0]) ?? 0;
+    final m = int.tryParse(parts[1]) ?? 0;
+    final s = int.tryParse(parts[2]) ?? 0;
+
+    String result = '';
+    if (h > 0) result += '${h}h ';
+    if (m > 0 || h > 0) result += '${m.toString().padLeft(2, '0')}m ';
+    result += '${s.toString().padLeft(2, '0')}s';
+
+    return result.trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
       return const Scaffold(
-        backgroundColor: Color(0xFF0A1628),
+        backgroundColor: darkBgColor,
+        appBar: CustomNavbar(title: "Loading...", showBackButton: true),
         body: Center(
           child: CircularProgressIndicator(
-            color: Color(0xFF2196F3),
+            color: primaryColor,
           ),
         ),
       );
@@ -85,7 +121,8 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
 
     if (activityData == null) {
       return Scaffold(
-        backgroundColor: const Color(0xFF0A1628),
+        backgroundColor: darkBgColor,
+        appBar: const CustomNavbar(title: "Activity Detail", showBackButton: true),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -104,9 +141,9 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
               ElevatedButton(
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2196F3),
+                  backgroundColor: primaryColor,
                 ),
-                child: const Text('Go Back'),
+                child: const Text('Go Back', style: TextStyle(color: lightTextColor)),
               ),
             ],
           ),
@@ -114,123 +151,123 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
       );
     }
 
+    // ✅ IMPLEMENTASI AKHIR: Menggunakan CustomNavbar dan WaveBackground
     return Scaffold(
-      backgroundColor: const Color(0xFF0A1628),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Back button
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-            
-            Expanded(
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Title - ambil dari activity_title atau gunakan default
-                      Text(
-                        _getActivityTitle(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      
-                      // Date and time
-                      Row(
-                        children: [
-                          const Icon(Icons.calendar_today, 
-                            color: Colors.white70, size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            DateFormat('MMMM dd, yyyy').format(
-                              DateTime.parse(activityData!['timestamp'])
-                            ),
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                          const SizedBox(width: 24),
-                          const Icon(Icons.access_time, 
-                            color: Colors.white70, size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            DateFormat('HH:mm').format(
-                              DateTime.parse(activityData!['start_time'])
-                            ),
-                            style: const TextStyle(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      
-                      // Distance Breakdown
-                      _buildDistanceBreakdown(),
-                      const SizedBox(height: 24),
-                      
-                      // Overall Statistics
-                      _buildOverallStatistics(),
-                      const SizedBox(height: 24),
-                      
-                      // Notes - hanya tampilkan jika ada
-                      if (_hasNotes()) _buildNotes(),
-                    ],
+      backgroundColor: darkBgColor,
+      appBar: const CustomNavbar(
+        title: "Activity Detail",
+        showBackButton: true,
+      ),
+      body: WaveBackground(
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 20),
+                        _buildTitleAndDate(),
+                        const SizedBox(height: 24),
+
+                        _buildDistanceBreakdown(),
+                        const SizedBox(height: 24),
+
+                        _buildOverallStatistics(context),
+                        const SizedBox(height: 24),
+
+                        if (segments.isNotEmpty) _buildSegmentsDetail(),
+                        if (segments.isNotEmpty) const SizedBox(height: 24),
+
+                        if (_hasNotes()) _buildNotes(),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // Helper untuk mendapatkan activity title
+  Widget _buildTitleAndDate() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _getActivityTitle(),
+          style: const TextStyle(
+            color: lightTextColor,
+            fontSize: 32,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        Row(
+          children: [
+            const Icon(Icons.calendar_today,
+                color: primaryColor, size: 16),
+            const SizedBox(width: 8),
+            Text(
+              DateFormat('dd MMMM yyyy').format(
+                  DateTime.parse(activityData!['timestamp'])
+              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 15),
+            ),
+            const SizedBox(width: 20),
+            const Icon(Icons.access_time,
+                color: primaryColor, size: 16),
+            const SizedBox(width: 8),
+            Text(
+              DateFormat('HH:mm').format(
+                  DateTime.parse(activityData!['start_time'])
+              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 15),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   String _getActivityTitle() {
     final title = activityData!['activity_title'];
     if (title != null && title.toString().isNotEmpty) {
       return title;
     }
-    
-    // Fallback ke title berdasarkan swimming style
+
     final style = activityData!['swimming_style'] ?? 'Mixed';
-    switch (style.toLowerCase()) {
-      case 'freestyle':
-        return 'Freestyle Session';
-      case 'breaststroke':
-        return 'Breaststroke Practice';
-      case 'backstroke':
-        return 'Backstroke Training';
-      case 'butterfly':
-        return 'Butterfly Workout';
-      case 'mixed':
-        return 'Mixed Style Session';
-      default:
-        return 'Swimming Session';
-    }
+    return '${_getStrokeName(style)} Session';
   }
 
-  // Helper untuk mengecek apakah ada notes
   bool _hasNotes() {
     final notes = activityData!['activity_notes'];
     return notes != null && notes.toString().isNotEmpty;
   }
 
   Widget _buildDistanceBreakdown() {
+    final totalDistance = activityData!['total_distance'] as int;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E3A5F),
-        borderRadius: BorderRadius.circular(16),
+        color: cardBgColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: primaryColor.withValues(alpha: 0.3),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -238,74 +275,73 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
           const Text(
             'Distance Breakdown',
             style: TextStyle(
-              color: Colors.white,
+              color: lightTextColor,
               fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 20),
-          
-          // Progress bar
+
           SizedBox(
-            height: 40,
-            child: Stack(
-              children: [
-                Row(
-                  children: segments.map((segment) {
-                    return Expanded(
-                      flex: segment['distance'] as int,
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 2),
-                        decoration: BoxDecoration(
-                          color: _getStrokeColor(segment['style']),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Center(
-                          child: Text(
-                            '${segment['distance']} m',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
+            height: 25,
+            child: Row(
+              children: segments.map((segment) {
+                final distance = segment['distance'] as int;
+                if (distance == 0) return const SizedBox.shrink();
+
+                return Expanded(
+                  flex: distance,
+                  child: Tooltip(
+                    message: '${_getStrokeName(segment['style'])}: ${distance}m',
+                    child: Container(
+                      margin: const EdgeInsets.only(right: 2),
+                      decoration: BoxDecoration(
+                        color: _getStrokeColor(segment['style']),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Center(
+                        child: Text(
+                          distance > totalDistance * 0.1 ? '${distance}m' : '',
+                          style: const TextStyle(
+                            color: lightTextColor,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 10,
                           ),
                         ),
                       ),
-                    );
-                  }).toList(),
-                ),
-              ],
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
           ),
           const SizedBox(height: 16),
-          
-          // Distance labels
+
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('0m', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const Text('0m', style: TextStyle(color: Colors.white70, fontSize: 13)),
               Text(
-                '${activityData!['total_distance'] / 1000} km',
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                '$totalDistance m',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
             ],
           ),
           const SizedBox(height: 20),
-          
-          // Legend
+
           Wrap(
-            spacing: 16,
-            runSpacing: 8,
+            spacing: 20,
+            runSpacing: 10,
             children: _getUniqueStrokes().map((style) {
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 16,
-                    height: 16,
+                    width: 12,
+                    height: 12,
                     decoration: BoxDecoration(
                       color: _getStrokeColor(style),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(3),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -322,16 +358,66 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
     );
   }
 
-  Widget _buildOverallStatistics() {
-    final totalTime = activityData!['total_time'] as String;
-    final parts = totalTime.split(':');
-    final formattedTime = '${parts[0]}:${parts[1]}';
-    
+  // ✅ Responsif: _buildOverallStatistics menggunakan responsivitas AppBreakpoints
+  Widget _buildOverallStatistics(BuildContext context) {
+    final totalDistanceKm = (activityData!['total_distance'] / 1000).toStringAsFixed(2);
+    final formattedTime = _formatTotalTime(activityData!['total_time'] as String);
+    final pace = activityData!['pace'] as String;
+
+    final stats = [
+      {'label': 'TOTAL DISTANCE', 'value': '$totalDistanceKm km', 'icon': Icons.directions_run},
+      {'label': 'TOTAL TIME', 'value': formattedTime, 'icon': Icons.access_time_filled},
+      {'label': 'AVERAGE PACE (100m)', 'value': pace.substring(3), 'icon': Icons.speed},
+      {'label': 'TOTAL STROKES', 'value': '${activityData!['total_strokes']}', 'icon': Icons.rowing},
+      {'label': 'CALORIES BURNED', 'value': '${activityData!['calories']} kcal', 'icon': Icons.local_fire_department},
+      {'label': 'CONFIDENCE', 'value': '${(activityData!['confidence'] * 100).toStringAsFixed(0)}%', 'icon': Icons.check_circle_outline},
+    ];
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    // Tentukan jumlah kolom: 3 kolom jika lebar >= AppBreakpoints.lg (1024), jika tidak 2 kolom.
+    final columns = screenWidth >= AppBreakpoints.lg ? 3 : 2;
+
+    List<Widget> columnWidgets = [];
+
+    if (columns == 3) {
+      // 3 Kolom: 2 item per kolom
+      final column1 = stats.sublist(0, 2);
+      final column2 = stats.sublist(2, 4);
+      final column3 = stats.sublist(4, 6);
+
+      columnWidgets = [
+        Expanded(child: Column(children: column1.map((item) => _buildStatItem(item['label'] as String, item['value'] as String, item['icon'] as IconData)).toList())),
+        const SizedBox(width: 16),
+        Expanded(child: Column(children: column2.map((item) => _buildStatItem(item['label'] as String, item['value'] as String, item['icon'] as IconData)).toList())),
+        const SizedBox(width: 16),
+        Expanded(child: Column(children: column3.map((item) => _buildStatItem(item['label'] as String, item['value'] as String, item['icon'] as IconData)).toList())),
+      ];
+
+    } else {
+      // 2 Kolom: 3 item per kolom (tampilan default)
+      final column1 = stats.sublist(0, 3);
+      final column2 = stats.sublist(3);
+
+      columnWidgets = [
+        Expanded(child: Column(children: column1.map((item) => _buildStatItem(item['label'] as String, item['value'] as String, item['icon'] as IconData)).toList())),
+        const SizedBox(width: 16),
+        Expanded(child: Column(children: column2.map((item) => _buildStatItem(item['label'] as String, item['value'] as String, item['icon'] as IconData)).toList())),
+      ];
+    }
+
+    // Final Layout
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E3A5F),
-        borderRadius: BorderRadius.circular(16),
+        color: cardBgColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: primaryColor.withValues(alpha: 0.3),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -339,119 +425,122 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
           const Text(
             'Overall Statistics',
             style: TextStyle(
-              color: Colors.white,
+              color: lightTextColor,
               fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 20),
-          
+
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: columnWidgets,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Row(
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'TOTAL DISTANCE',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${activityData!['total_distance'] / 1000} km',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'AVERAGE PACE',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      activityData!['pace'],
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'CALORIES BURNED',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${activityData!['calories']} kcal',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'TOTAL TIME',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      formattedTime,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'TOTAL STROKES',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${activityData!['total_strokes']}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+              Icon(icon, color: accentColor, size: 16),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    letterSpacing: 0.8,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              color: lightTextColor,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegmentsDetail() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardBgColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: primaryColor.withValues(alpha: 0.3),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Detailed Segments',
+            style: TextStyle(
+              color: lightTextColor,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 15),
+          ...segments.map((segment) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _getStrokeColor(segment['style']),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _getStrokeName(segment['style']),
+                      style: const TextStyle(
+                        color: lightTextColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+                Text(
+                  '${segment['distance']}m (${_formatTotalTime(segment['segment_time'])})',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 15,
+                  ),
+                ),
+              ],
+            ),
+          )),
         ],
       ),
     );
@@ -459,24 +548,31 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
 
   Widget _buildNotes() {
     final notes = activityData!['activity_notes'];
-    
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E3A5F),
-        borderRadius: BorderRadius.circular(16),
+        color: cardBgColor,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: primaryColor.withValues(alpha: 0.3),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: const [
-              Icon(Icons.note_outlined, color: Colors.white70, size: 20),
+              Icon(Icons.note_outlined, color: primaryColor, size: 20),
               SizedBox(width: 8),
               Text(
                 'Notes',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: lightTextColor,
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -488,7 +584,7 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
             notes ?? 'No notes available',
             style: const TextStyle(
               color: Colors.white70,
-              fontSize: 14,
+              fontSize: 15,
               height: 1.5,
             ),
           ),
@@ -504,7 +600,7 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
       case 'butterfly':
         return const Color(0xFFFF9800);
       case 'freestyle':
-        return const Color(0xFF2196F3);
+        return primaryColor;
       case 'backstroke':
         return const Color(0xFFAB47BC);
       default:
@@ -513,6 +609,7 @@ class _HistoryDetailPageState extends State<HistoryDetailPage> {
   }
 
   String _getStrokeName(String style) {
+    if (style.isEmpty) return 'Unknown';
     return style[0].toUpperCase() + style.substring(1);
   }
 

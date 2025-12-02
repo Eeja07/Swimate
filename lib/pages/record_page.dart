@@ -6,7 +6,40 @@ import 'confirm_activity.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:math' as math;
+import '../widgets/wave_background.dart';
 
+// --- Konstanta Warna Tema ---
+const Color primaryColor = Color(0xFF1976D2);
+const Color accentColor = Color(0xFF4FC3F7);
+const Color lightTextColor = Colors.white;
+const Color darkBgColor = Colors.black;
+const Color warningColor = Color(0xFFFF5500); // Oranye/Merah untuk aksi Stop
+
+// ==================== RESPONSIVE HELPERS (Tailwind-like) ====================
+class AppBreakpoints {
+  static const double sm = 640; // small -> mobile large
+  static const double md = 768; // medium -> tablet portrait
+  static const double lg = 1024; // large -> tablet landscape / small desktop
+  static const double xl = 1280; // extra large -> desktop
+}
+
+/// Helper to pick a value based on screen width, similar to tailwind responsive utils.
+/// Provide at least [sm]. md, lg, xl are optional fallbacks.
+T responsive<T>({
+  required BuildContext context,
+  required T sm,
+  T? md,
+  T? lg,
+  T? xl,
+}) {
+  final width = MediaQuery.of(context).size.width;
+  if (xl != null && width >= AppBreakpoints.xl) return xl;
+  if (lg != null && width >= AppBreakpoints.lg) return lg;
+  if (md != null && width >= AppBreakpoints.md) return md;
+  return sm;
+}
+
+// ==================== RecordPage ====================
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
 
@@ -16,56 +49,44 @@ class RecordPage extends StatefulWidget {
 
 class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   // ==================== STATE VARIABLES ====================
-  
+
   // Recording state
   bool isRecording = false;
   bool isPaused = false;
   int seconds = 0;
-  
+
   // Activity metrics
   int strokes = 0;
   double distance = 0.0;
-  
+
   // Timers
   Timer? _mainTimer;
   Timer? _sensorTimer;
-  
+
   // Sensor data
   StreamSubscription<AccelerometerEvent>? _accelSubscription;
   StreamSubscription<GyroscopeEvent>? _gyroSubscription;
   AccelerometerEvent? _lastAccelEvent;
   GyroscopeEvent? _lastGyroEvent;
   final List<Map<String, dynamic>> _sensorSamples = [];
-  
+
   // Stroke detection
   double _lastAccelMagnitude = 0.0;
   int _lastStrokeTimestamp = 0;
-  
+
   // GPS tracking
   StreamSubscription<Position>? _positionSubscription;
   Position? _lastPosition;
-  
+
   // Animations
   late AnimationController _animController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
 
-  // Swimming style segments
-  final List<Map<String, dynamic>> _segments = [];
-  String _currentStyle = 'freestyle';
-  int _segmentStartTime = 0;
-  Timer? _styleChangeTimer;
-
-  // List of swimming styles
-  final List<String> _swimmingStyles = [
-    'freestyle',
-    'backstroke',
-    'breaststroke',
-    'butterfly',
-  ];
+  // Variabel Swimming style segments DIHAPUS
 
   // ==================== LIFECYCLE METHODS ====================
-  
+
   @override
   void initState() {
     super.initState();
@@ -79,7 +100,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   // ==================== INITIALIZATION ====================
-  
+
   void _initializeAnimations() {
     _animController = AnimationController(
       duration: const Duration(milliseconds: 500),
@@ -87,7 +108,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 1),
+      begin: const Offset(0, 0.1),
       end: Offset.zero,
     ).animate(
       CurvedAnimation(
@@ -108,23 +129,21 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     _animController.dispose();
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
-    _styleChangeTimer?.cancel();
+    // _styleChangeTimer?.cancel(); DIHAPUS
     _accelSubscription?.cancel();
     _gyroSubscription?.cancel();
     _positionSubscription?.cancel();
   }
 
   // ==================== GPS STATUS ====================
-  
+
   Future<void> _updateGpsStatus() async {
-    // This method checks GPS status for potential UI indicators
-    // Currently not used but kept for future GPS status display
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       final permission = await Geolocator.checkPermission();
 
       String newStatus = 'Unknown';
-      
+
       if (!serviceEnabled) {
         newStatus = 'Disabled';
       } else if (permission == LocationPermission.denied ||
@@ -136,97 +155,39 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         newStatus = 'Locked';
       }
 
-      // Status can be used for UI feedback in the future
       debugPrint('GPS Status: $newStatus');
     } catch (e) {
       debugPrint('Error checking GPS status: $e');
     }
   }
 
-  // ==================== SWIMMING STYLE SEGMENT TRACKING ====================
-
-  void _startStyleTracking() {
-    _segments.clear();
-    _currentStyle = _getRandomStyle();
-    _segmentStartTime = seconds;
-    
-    // Change style randomly every 15-45 seconds
-    _scheduleNextStyleChange();
-  }
-
-  void _scheduleNextStyleChange() {
-    _styleChangeTimer?.cancel();
-    
-    // Random duration between 15-45 seconds
-    final randomSeconds = 15 + (math.Random().nextInt(31));
-    
-    _styleChangeTimer = Timer(Duration(seconds: randomSeconds), () {
-      if (isRecording && !isPaused) {
-        _changeSwimmingStyle();
-        _scheduleNextStyleChange();
-      }
-    });
-  }
-
-  void _changeSwimmingStyle() {
-    // Save current segment
-    _segments.add({
-      'style': _currentStyle,
-      'start_time': _segmentStartTime,
-      'end_time': seconds,
-      'duration': seconds - _segmentStartTime,
-    });
-    
-    // Change to new random style (different from current)
-    String newStyle;
-    do {
-      newStyle = _getRandomStyle();
-    } while (newStyle == _currentStyle && _swimmingStyles.length > 1);
-    
-    setState(() {
-      _currentStyle = newStyle;
-      _segmentStartTime = seconds;
-    });
-    
-    debugPrint('Style changed to: $_currentStyle');
-  }
-
-  String _getRandomStyle() {
-    return _swimmingStyles[math.Random().nextInt(_swimmingStyles.length)];
-  }
+  // ==================== SWIMMING STYLE SEGMENT TRACKING (DIHAPUS) ====================
+  // Semua fungsionalitas style tracking dihapus dari sini
 
   void _finalizeSegments() {
-    // Add final segment
-    if (_segmentStartTime < seconds) {
-      _segments.add({
-        'style': _currentStyle,
-        'start_time': _segmentStartTime,
-        'end_time': seconds,
-        'duration': seconds - _segmentStartTime,
-      });
-    }
+    // Tidak ada segment yang difinalisasi lagi
   }
 
   // ==================== RECORDING CONTROLS ====================
-  
+
   void _startRecording() {
     setState(() {
       isRecording = true;
       isPaused = false;
     });
-    
+
     _startMainTimer();
     _startSensorTracking();
     _startGpsTracking();
-    _startStyleTracking();
+    // _startStyleTracking(); DIHAPUS
   }
 
   void _pauseRecording() {
     setState(() => isPaused = true);
-    
+
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
-    _styleChangeTimer?.cancel();
+    // _styleChangeTimer?.cancel(); DIHAPUS
     _accelSubscription?.pause();
     _gyroSubscription?.pause();
     _positionSubscription?.pause();
@@ -234,35 +195,32 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
   void _resumeRecording() {
     setState(() => isPaused = false);
-    
+
     _startMainTimer();
     _startSensorSampling();
-    _scheduleNextStyleChange();
+    // _scheduleNextStyleChange(); DIHAPUS
     _accelSubscription?.resume();
     _gyroSubscription?.resume();
     _positionSubscription?.resume();
   }
 
   void _stopRecording() {
-    // Finalize segments
-    _finalizeSegments();
-    
-    // Save data before resetting
+    _finalizeSegments(); // Sekarang hanya fungsi kosong
+
     final recordedSeconds = seconds;
     final recordedDistance = distance;
     final recordedStrokes = strokes;
     final recordedSensors = List<Map<String, dynamic>>.from(_sensorSamples);
-    final recordedSegments = List<Map<String, dynamic>>.from(_segments);
 
-    // Stop all tracking
+    // Segments dihilangkan dari data yang dikirim
+
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
-    _styleChangeTimer?.cancel();
+    // _styleChangeTimer?.cancel(); DIHAPUS
     _accelSubscription?.cancel();
     _gyroSubscription?.cancel();
     _positionSubscription?.cancel();
 
-    // Reset state
     setState(() {
       isRecording = false;
       isPaused = false;
@@ -270,13 +228,12 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       strokes = 0;
       distance = 0.0;
       _sensorSamples.clear();
-      _segments.clear();
+      // _segments.clear(); DIHAPUS
       _lastPosition = null;
     });
 
-    // Navigate to confirmation page
     if (mounted) {
-      Navigator.push(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => ConfirmActivityPage(
@@ -284,7 +241,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
             distance: recordedDistance,
             strokes: recordedStrokes,
             sensorData: recordedSensors,
-            segments: recordedSegments,
+            // segments: recordedSegments, DIHAPUS
           ),
         ),
       );
@@ -292,13 +249,12 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   // ==================== TIMER MANAGEMENT ====================
-  
+
   void _startMainTimer() {
     _mainTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
         setState(() {
           seconds++;
-          // Fallback distance simulation if GPS unavailable
           if (_lastPosition == null) {
             distance += 0.5;
           }
@@ -308,16 +264,14 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   // ==================== SENSOR TRACKING ====================
-  
+
   void _startSensorTracking() {
     _sensorSamples.clear();
 
-    // Subscribe to accelerometer
     _accelSubscription = accelerometerEventStream().listen((event) {
       _lastAccelEvent = event;
     });
 
-    // Subscribe to gyroscope
     _gyroSubscription = gyroscopeEventStream().listen((event) {
       _lastGyroEvent = event;
     });
@@ -332,8 +286,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
     _sensorTimer = Timer.periodic(samplingInterval, (_) {
       final now = DateTime.now().millisecondsSinceEpoch;
-      
-      // Get current sensor values
+
       final ax = _lastAccelEvent?.x ?? 0.0;
       final ay = _lastAccelEvent?.y ?? 0.0;
       final az = _lastAccelEvent?.z ?? 0.0;
@@ -341,10 +294,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       final gy = _lastGyroEvent?.y ?? 0.0;
       final gz = _lastGyroEvent?.z ?? 0.0;
 
-      // Calculate acceleration magnitude
       final magnitude = math.sqrt(ax * ax + ay * ay + az * az);
 
-      // Detect stroke (peak crossing with debounce)
       if (_isStrokeDetected(magnitude, now, strokeThreshold, strokeDebounceMs)) {
         strokes++;
         _lastStrokeTimestamp = now;
@@ -352,7 +303,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
       _lastAccelMagnitude = magnitude;
 
-      // Store sample
       _sensorSamples.add({
         't': now,
         'ax': ax,
@@ -372,11 +322,11 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   // ==================== GPS TRACKING ====================
-  
+
   void _startGpsTracking() {
     Future.microtask(() async {
       await _updateGpsStatus();
-      
+
       try {
         final permission = await _requestLocationPermission();
         if (permission == null) return;
@@ -391,16 +341,16 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
   Future<LocationPermission?> _requestLocationPermission() async {
     LocationPermission permission = await Geolocator.checkPermission();
-    
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    
+
     if (permission == LocationPermission.deniedForever ||
         permission == LocationPermission.denied) {
       return null;
     }
-    
+
     return permission;
   }
 
@@ -409,7 +359,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       const locationSettings = LocationSettings(
         accuracy: LocationAccuracy.best,
       );
-      
+
       final position = await Geolocator.getCurrentPosition(
         locationSettings: locationSettings,
       );
@@ -451,119 +401,147 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   // ==================== UI BUILD METHODS ====================
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF000000),
+      backgroundColor: darkBgColor,
       appBar: const CustomNavbar(title: "Record"),
       extendBody: true,
-      body: FadeTransition(
-        opacity: _fadeAnimation,
-        child: SlideTransition(
-          position: _slideAnimation,
-          child: _buildBody(context),
-        ),
+      // gunakan LayoutBuilder agar WaveBackground / body bisa menyesuaikan tinggi konten / layar
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return WaveBackground(
+            child: SingleChildScrollView(
+              // pastikan tinggi minimum mengikuti layar agar footer bottom bar tidak overlap konten
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: IntrinsicHeight(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: SlideTransition(
+                      position: _slideAnimation,
+                      child: _buildBody(context),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
       bottomNavigationBar: _buildBottomBar(context),
     );
   }
 
   Widget _buildBody(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+    // responsive spacing untuk seluruh layout
+    final topPadding = responsive(
+      context: context,
+      sm: 24.0,
+      md: 30.0,
+      lg: 40.0,
+      xl: 48.0,
+    );
+
+    final betweenLargeSections = responsive(
+      context: context,
+      sm: 20.0,
+      md: 30.0,
+      lg: 40.0,
+    );
+
+    // bottom spacing: gunakan safe area + sedikit ekstra yang responsive
+    final bottomExtra = responsive(
+      context: context,
+      sm: 10.0,
+      md: 16.0,
+      lg: 24.0,
+    );
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: responsive(context: context, sm: 12, md: 16, lg: 24)),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _buildCurrentStyleIndicator(),
-          const SizedBox(height: 12),
-          _buildStopwatch(),
-          const SizedBox(height: 20),
+          SizedBox(height: topPadding),
+          _buildStopwatch(context),
+          SizedBox(height: betweenLargeSections),
           _buildMetrics(),
-          const SizedBox(height: 20),
+          SizedBox(height: betweenLargeSections),
           _buildActionButton(),
-          SizedBox(height: MediaQuery.of(context).padding.bottom + 60),
+          // ruang bawah yang proporsional agar tidak terlalu besar
+          SizedBox(height: MediaQuery.of(context).padding.bottom + bottomExtra),
         ],
       ),
     );
   }
 
-  Widget _buildCurrentStyleIndicator() {
-    if (!isRecording) return const SizedBox.shrink();
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF006AFF).withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF006AFF), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.pool, color: Color(0xFF006AFF), size: 18),
-          const SizedBox(width: 8),
-          Text(
-            _currentStyle.toUpperCase(),
-            style: const TextStyle(
-              color: Color(0xFF006AFF),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // Indicator Swimming Style DIHAPUS
 
-  Widget _buildStopwatch() {
+  Widget _buildStopwatch(BuildContext context) {
     final hours = seconds ~/ 3600;
     final minutes = (seconds % 3600) ~/ 60;
     final secs = seconds % 60;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 35),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _timeRow(
-            value: hours.toString(),
-            unit: 'h',
-            valueColor: const Color(0xFF3A3B3C),
-            unitColor: const Color(0xFFFF5500),
+    String timeString;
+    if (hours > 0) {
+      timeString =
+      '${hours.toString().padLeft(2, '0')}:'
+          '${minutes.toString().padLeft(2, '0')}:'
+          '${secs.toString().padLeft(2, '0')}';
+    } else {
+      timeString =
+      '${minutes.toString().padLeft(2, '0')}:'
+          '${secs.toString().padLeft(2, '0')}';
+    }
+
+    // responsive font size for stopwatch
+    final fontSize = responsive(
+      context: context,
+      sm: 72.0,
+      md: 88.0,
+      lg: 100.0,
+      xl: 120.0,
+    );
+
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Text(
+          timeString,
+          style: TextStyle(
+            color: lightTextColor,
+            fontSize: fontSize,
+            fontWeight: FontWeight.w100,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
-          _timeRow(
-            value: minutes.toString(),
-            unit: 'm',
-            valueColor: const Color(0xFF006AFF),
-            unitColor: const Color(0xFFFF5500),
-          ),
-          _timeRow(
-            value: secs.toString(),
-            unit: 's',
-            valueColor: const Color(0xFFFFFFFF),
-            unitColor: const Color(0xFFFF5500),
-          ),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildMetrics() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _buildMetricColumn(
-          value: "${distance.toStringAsFixed(1)} m",
-          label: "Distance",
-          color: const Color(0xFF006AFF),
-        ),
-        _buildMetricColumn(
-          value: "$strokes",
-          label: "Strokes",
-          color: const Color(0xFFF1DF4D),
-        ),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildMetricColumn(
+            value: "${distance.toStringAsFixed(0)} m",
+            label: "Distance",
+            color: primaryColor,
+            icon: Icons.route_outlined,
+          ),
+          Container(width: 1, height: 60, color: Colors.white12),
+          _buildMetricColumn(
+            value: "$strokes",
+            label: "Strokes",
+            color: primaryColor,
+            icon: Icons.rowing_outlined,
+          ),
+        ],
+      ),
     );
   }
 
@@ -571,23 +549,32 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     required String value,
     required String label,
     required Color color,
+    required IconData icon,
   }) {
     return Column(
       children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontSize: 22,
-            fontWeight: FontWeight.w300,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              value,
+              style: const TextStyle(
+                color: lightTextColor,
+                fontSize: 28,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
         Text(
           label,
           style: const TextStyle(
-            color: Color(0xFF3A3B3C),
+            color: Colors.white54,
             fontSize: 14,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ],
@@ -605,40 +592,54 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   Widget _buildStartButton() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 3),
-      child: SizedBox(
-        width: double.infinity,
-        child: _mainButton(
-          label: "Start",
-          color: const Color(0xFF006AFF),
-          icon: Icons.play_arrow,
-          onPressed: _startRecording,
-        ),
+    final size = responsive(
+      context: context,
+      sm: 120.0,
+      md: 140.0,
+      lg: 160.0,
+      xl: 180.0,
+    );
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: _roundButton(
+        color: primaryColor, // START: Warna Biru Utama
+        icon: Icons.play_arrow_rounded,
+        onPressed: _startRecording,
+        iconSize: responsive(context: context, sm: 44.0, md: 48.0, lg: 52.0),
       ),
     );
   }
 
   Widget _buildPausedButtons() {
+    final smallSize = responsive(context: context, sm: 88.0, md: 100.0, lg: 120.0);
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 3),
+      padding: EdgeInsets.symmetric(horizontal: responsive(context: context, sm: 12, md: 24, lg: 40)),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          Expanded(
-            child: _smallButton(
-              label: "Resume",
-              color: const Color(0xFF006AFF),
-              icon: Icons.play_arrow,
+          // Tombol Resume
+          SizedBox(
+            width: smallSize,
+            height: smallSize,
+            child: _roundButton(
+              color: primaryColor, // RESUME: Warna Biru Utama
+              icon: Icons.play_arrow_rounded,
               onPressed: _resumeRecording,
+              iconSize: responsive(context: context, sm: 32.0, md: 36.0, lg: 40.0),
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _smallButton(
-              label: "Stop",
-              color: Colors.white,
-              icon: Icons.stop,
+          // Tombol Stop
+          SizedBox(
+            width: smallSize,
+            height: smallSize,
+            child: _roundButton(
+              color: warningColor, // STOP: Warna Oranye/Merah
+              icon: Icons.stop_rounded,
               onPressed: _stopRecording,
+              iconSize: responsive(context: context, sm: 32.0, md: 36.0, lg: 40.0),
             ),
           ),
         ],
@@ -647,16 +648,16 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   Widget _buildPauseButton() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 3),
-      child: SizedBox(
-        width: double.infinity,
-        child: _mainButton(
-          label: "Pause",
-          color: Colors.white,
-          icon: Icons.pause,
-          onPressed: _pauseRecording,
-        ),
+    final size = responsive(context: context, sm: 120.0, md: 140.0, lg: 160.0);
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: _roundButton(
+        color: accentColor, // PAUSE: Warna Biru Muda/Aksen
+        icon: Icons.pause_rounded,
+        onPressed: _pauseRecording,
+        iconSize: responsive(context: context, sm: 44.0, md: 48.0, lg: 52.0),
       ),
     );
   }
@@ -672,87 +673,28 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     );
   }
 
-  // ==================== BUTTON WIDGETS ====================
-  
-  Widget _mainButton({
-    required String label,
+  // ==================== CUSTOM BUTTON WIDGETS (Disederhanakan) ====================
+
+  // Tombol Lingkaran Konsisten untuk semua aksi
+  Widget _roundButton({
     required Color color,
     required IconData icon,
     required VoidCallback onPressed,
+    double iconSize = 50,
   }) {
-    return ElevatedButton.icon(
+    return ElevatedButton(
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(50),
-        ),
+        shape: const CircleBorder(),
+        padding: const EdgeInsets.all(10),
+        // beri sedikit shadow agar menempel di atas wave bg
+        elevation: 6,
       ),
       onPressed: onPressed,
-      icon: Icon(icon, size: 30, color: Colors.black),
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 20, color: Colors.black),
-      ),
-    );
-  }
-
-  Widget _smallButton({
-    required String label,
-    required Color color,
-    required IconData icon,
-    required VoidCallback onPressed,
-  }) {
-    return ElevatedButton.icon(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(30),
-        ),
-      ),
-      onPressed: onPressed,
-      icon: Icon(icon, size: 40, color: Colors.black),
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 16, color: Colors.black),
-      ),
-    );
-  }
-
-  Widget _timeRow({
-    required String value,
-    required String unit,
-    required Color valueColor,
-    required Color unitColor,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              color: valueColor,
-              fontSize: 96,
-              fontWeight: FontWeight.w100,
-            ),
-          ),
-          const SizedBox(width: 4),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Text(
-              unit,
-              style: TextStyle(
-                color: unitColor,
-                fontSize: 21,
-                fontWeight: FontWeight.normal,
-              ),
-            ),
-          ),
-        ],
+      child: Icon(
+        icon,
+        size: iconSize,
+        color: lightTextColor, // Ikon selalu putih
       ),
     );
   }
