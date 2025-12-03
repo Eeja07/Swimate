@@ -6,6 +6,8 @@ class ActivityModel {
   final int totalStrokes;
   final Duration pace;
   final DateTime timestamp;
+  final double? styleConfidence; // ML model confidence score
+  final String? detectedStyle; // Original ML detected style before user override
 
   ActivityModel({
     required this.idActivity,
@@ -15,6 +17,8 @@ class ActivityModel {
     required this.totalStrokes,
     required this.pace,
     required this.timestamp,
+    this.styleConfidence,
+    this.detectedStyle,
   });
 
   factory ActivityModel.fromJson(Map<String, dynamic> json) {
@@ -26,6 +30,8 @@ class ActivityModel {
       totalStrokes: json['total_strokes'] ?? 0,
       pace: _parseDuration(json['pace']),
       timestamp: DateTime.parse(json['timestamp']),
+      styleConfidence: json['style_confidence']?.toDouble(),
+      detectedStyle: json['detected_style'],
     );
   }
 

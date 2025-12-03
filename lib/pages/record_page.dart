@@ -7,6 +7,7 @@ import 'package:sensors_plus/sensors_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:math' as math;
 import '../widgets/wave_background.dart';
+import '../services/swimming_style_detector.dart';
 
 // --- Konstanta Warna Tema ---
 const Color primaryColor = Color(0xFF1976D2);
@@ -83,7 +84,14 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
 
-  // Variabel Swimming style segments DIHAPUS
+  // Swimming style detection
+  String _currentDetectedStyle = 'Detecting...';
+  double _styleConfidence = 0.0;
+  String _previousDetectedStyle = '';
+  int _styleChangeCount = 0;
+  Timer? _styleDetectionTimer;
+  final _styleDetector = SwimmingStyleDetector.instance;
+  bool _isModelReady = false;
 
   // ==================== LIFECYCLE METHODS ====================
 
@@ -91,6 +99,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _initializeAnimations();
+    _initializeMLModel();
   }
 
   @override
@@ -125,11 +134,26 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     _animController.forward();
   }
 
+  void _initializeMLModel() async {
+    debugPrint('🤖 Initializing ML model...');
+    final success = await _styleDetector.loadModel();
+    if (mounted) {
+      setState(() {
+        _isModelReady = success;
+      });
+    }
+    if (success) {
+      debugPrint('✅ ML model ready');
+    } else {
+      debugPrint('❌ Failed to load ML model');
+    }
+  }
+
   void _disposeResources() {
     _animController.dispose();
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
-    // _styleChangeTimer?.cancel(); DIHAPUS
+    _styleDetectionTimer?.cancel();
     _accelSubscription?.cancel();
     _gyroSubscription?.cancel();
     _positionSubscription?.cancel();
@@ -174,12 +198,14 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     setState(() {
       isRecording = true;
       isPaused = false;
+      _styleChangeCount = 0;
+      _previousDetectedStyle = '';
     });
 
     _startMainTimer();
     _startSensorTracking();
     _startGpsTracking();
-    // _startStyleTracking(); DIHAPUS
+    _startStyleDetection();
   }
 
   void _pauseRecording() {
@@ -187,7 +213,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
-    // _styleChangeTimer?.cancel(); DIHAPUS
+    _styleDetectionTimer?.cancel();
     _accelSubscription?.pause();
     _gyroSubscription?.pause();
     _positionSubscription?.pause();
@@ -198,7 +224,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
     _startMainTimer();
     _startSensorSampling();
-    // _scheduleNextStyleChange(); DIHAPUS
+    _startStyleDetection();
     _accelSubscription?.resume();
     _gyroSubscription?.resume();
     _positionSubscription?.resume();
@@ -211,12 +237,12 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     final recordedDistance = distance;
     final recordedStrokes = strokes;
     final recordedSensors = List<Map<String, dynamic>>.from(_sensorSamples);
-
-    // Segments dihilangkan dari data yang dikirim
+    final detectedStyle = _currentDetectedStyle;
+    final styleConfidence = _styleConfidence;
 
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
-    // _styleChangeTimer?.cancel(); DIHAPUS
+    _styleDetectionTimer?.cancel();
     _accelSubscription?.cancel();
     _gyroSubscription?.cancel();
     _positionSubscription?.cancel();
@@ -228,8 +254,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       strokes = 0;
       distance = 0.0;
       _sensorSamples.clear();
-      // _segments.clear(); DIHAPUS
       _lastPosition = null;
+      _currentDetectedStyle = 'Detecting...';
+      _styleConfidence = 0.0;
     });
 
     if (mounted) {
@@ -241,7 +268,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
             distance: recordedDistance,
             strokes: recordedStrokes,
             sensorData: recordedSensors,
-            // segments: recordedSegments, DIHAPUS
+            detectedStyle: detectedStyle,
+            styleConfidence: styleConfidence,
           ),
         ),
       );
@@ -312,6 +340,10 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         'gy': gy,
         'gz': gz,
       });
+      
+      // Keep collecting samples without limit - store all data until stop is pressed
+      // This allows continuous detection throughout the entire session
+      // No removal of old samples - we want the complete recording
     });
   }
 
@@ -319,6 +351,136 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     return magnitude > threshold &&
         _lastAccelMagnitude <= threshold &&
         (now - _lastStrokeTimestamp) > debounceMs;
+  }
+
+  // ==================== SWIMMING STYLE DETECTION ====================
+
+  void _startStyleDetection() {
+    if (!_isModelReady) {
+      debugPrint('⚠️ Cannot start style detection: model not ready');
+      return;
+    }
+
+    debugPrint('🏁 Starting continuous style detection');
+
+    // First detection after 2.5 seconds (enough time to collect 50 samples at 50ms interval)
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (isRecording && !isPaused && mounted) {
+        debugPrint('⏰ First detection triggered');
+        _detectStyleOnce();
+      }
+    });
+
+    // Then detect style every 1.5 seconds for continuous real-time updates
+    _styleDetectionTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      if (!isPaused && mounted && isRecording) {
+        debugPrint('⏰ Continuous detection triggered');
+        _detectStyleOnce();
+      }
+    });
+  }
+
+  void _detectStyleOnce() async {
+    if (!mounted || !isRecording) return;
+    
+    final totalSamples = _sensorSamples.length;
+    
+    if (totalSamples >= SwimmingStyleDetector.windowSize) {
+      final startTime = DateTime.now();
+      debugPrint('🔍 Detection #${_styleChangeCount + 1} - Processing last 40 of $totalSamples total samples (${(totalSamples * 0.05).toStringAsFixed(1)}s recorded)');
+      
+      // Show some sample data for debugging
+      if (_sensorSamples.isNotEmpty) {
+        final recentSamples = _sensorSamples.length > 40 
+            ? _sensorSamples.sublist(_sensorSamples.length - 40)
+            : _sensorSamples;
+            
+        final firstSample = recentSamples.first;
+        final lastSample = recentSamples.last;
+        debugPrint('   Using samples from index ${_sensorSamples.length - recentSamples.length} to ${_sensorSamples.length - 1}');
+        debugPrint('   First: ax=${firstSample['ax']?.toStringAsFixed(2)}, ay=${firstSample['ay']?.toStringAsFixed(2)}, az=${firstSample['az']?.toStringAsFixed(2)}');
+        debugPrint('   Last: ax=${lastSample['ax']?.toStringAsFixed(2)}, ay=${lastSample['ay']?.toStringAsFixed(2)}, az=${lastSample['az']?.toStringAsFixed(2)}');
+        
+        // Calculate variance to check if data is changing
+        final axValues = recentSamples.map((s) => (s['ax'] ?? 0.0) as double).toList();
+        final ayValues = recentSamples.map((s) => (s['ay'] ?? 0.0) as double).toList();
+        final azValues = recentSamples.map((s) => (s['az'] ?? 0.0) as double).toList();
+        
+        final axMean = axValues.reduce((a, b) => a + b) / axValues.length;
+        final ayMean = ayValues.reduce((a, b) => a + b) / ayValues.length;
+        final azMean = azValues.reduce((a, b) => a + b) / azValues.length;
+        
+        final axVariance = axValues.map((v) => (v - axMean) * (v - axMean)).reduce((a, b) => a + b) / axValues.length;
+        final ayVariance = ayValues.map((v) => (v - ayMean) * (v - ayMean)).reduce((a, b) => a + b) / ayValues.length;
+        final azVariance = azValues.map((v) => (v - azMean) * (v - azMean)).reduce((a, b) => a + b) / azValues.length;
+        
+        debugPrint('   Variance: ax=${axVariance.toStringAsFixed(3)}, ay=${ayVariance.toStringAsFixed(3)}, az=${azVariance.toStringAsFixed(3)}');
+        
+        // Calculate some basic stats
+        final accelMags = recentSamples.map((s) {
+          final ax = s['ax'] ?? 0.0;
+          final ay = s['ay'] ?? 0.0;
+          final az = s['az'] ?? 0.0;
+          return math.sqrt(ax * ax + ay * ay + az * az);
+        }).toList();
+        final avgMag = accelMags.reduce((a, b) => a + b) / accelMags.length;
+        final maxMag = accelMags.reduce((a, b) => a > b ? a : b);
+        final minMag = accelMags.reduce((a, b) => a < b ? a : b);
+        debugPrint('   Magnitude: avg=${avgMag.toStringAsFixed(2)}, min=${minMag.toStringAsFixed(2)}, max=${maxMag.toStringAsFixed(2)}');
+      }
+      
+      try {
+        final result = await _styleDetector.detectStyleSmooth(_sensorSamples);
+        
+        final inferenceTime = DateTime.now().difference(startTime).inMilliseconds;
+        debugPrint('📦 Detection completed in ${inferenceTime}ms');
+        
+        if (result != null && mounted) {
+          final style = result['style'] as String;
+          final confidence = result['confidence'] as double;
+          
+          // Track style changes
+          if (_previousDetectedStyle.isNotEmpty && _previousDetectedStyle != style) {
+            _styleChangeCount++;
+            debugPrint('🔄 Style changed from $_previousDetectedStyle to $style (change #$_styleChangeCount)');
+          } else if (_previousDetectedStyle == style) {
+            debugPrint('✓ Style confirmed: $style (${(_styleConfidence * 100).toStringAsFixed(1)}% → ${(confidence * 100).toStringAsFixed(1)}%)');
+          }
+          _previousDetectedStyle = style;
+          
+          setState(() {
+            _currentDetectedStyle = style;
+            _styleConfidence = confidence;
+          });
+          
+          debugPrint('✅ Updated: $_currentDetectedStyle (${(_styleConfidence * 100).toStringAsFixed(1)}%)');
+          
+          // Show all probabilities
+          if (result.containsKey('probabilities')) {
+            final probs = result['probabilities'] as Map<String, dynamic>;
+            final sortedProbs = probs.entries.toList()
+              ..sort((a, b) => (b.value as double).compareTo(a.value as double));
+            debugPrint('   Top 3 predictions:');
+            for (var i = 0; i < 3 && i < sortedProbs.length; i++) {
+              debugPrint('     ${i + 1}. ${sortedProbs[i].key}: ${(sortedProbs[i].value * 100).toStringAsFixed(1)}%');
+            }
+          }
+        } else {
+          debugPrint('⚠️ Detection returned null or widget not mounted');
+        }
+      } catch (e, stackTrace) {
+        debugPrint('❌ Error in detection: $e');
+        debugPrint('   Stack: $stackTrace');
+      }
+    } else {
+      debugPrint('⏳ Collecting data: $totalSamples/${SwimmingStyleDetector.windowSize} samples');
+      // Update UI to show collecting status
+      if (mounted) {
+        setState(() {
+          // Force UI update to show collection progress
+        });
+      }
+    }
   }
 
   // ==================== GPS TRACKING ====================
@@ -467,6 +629,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           SizedBox(height: topPadding),
           _buildStopwatch(context),
           SizedBox(height: betweenLargeSections),
+          if (isRecording) _buildStyleIndicator(), // Show detected style during recording
+          if (isRecording) SizedBox(height: betweenLargeSections / 2),
           _buildMetrics(),
           SizedBox(height: betweenLargeSections),
           _buildActionButton(),
@@ -478,6 +642,111 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   // Indicator Swimming Style DIHAPUS
+
+  Widget _buildStyleIndicator() {
+    final styleIcon = _getStyleIcon(_currentDetectedStyle);
+    final confidencePercent = (_styleConfidence * 100).toStringAsFixed(0);
+    final isDetecting = _currentDetectedStyle == 'Detecting...' || !_isModelReady;
+    final sampleCount = _sensorSamples.length;
+    final minSamples = SwimmingStyleDetector.windowSize;
+    final duration = (sampleCount * 0.05).toStringAsFixed(1); // 50ms per sample
+    
+    // Build status text
+    String statusText = '';
+    if (!_isModelReady) {
+      statusText = 'Loading model...';
+    } else if (sampleCount < minSamples) {
+      statusText = 'Collecting: $sampleCount/$minSamples';
+    } else if (_currentDetectedStyle == 'Detecting...') {
+      statusText = 'Analyzing ${duration}s of data...';
+    } else {
+      statusText = 'Confidence: $confidencePercent% | ${duration}s';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: primaryColor.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: primaryColor.withValues(alpha: 0.3), width: 1),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isDetecting)
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                  ),
+                )
+              else
+                Icon(styleIcon, color: accentColor, size: 24),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _currentDetectedStyle.toUpperCase(),
+                    style: const TextStyle(
+                      color: lightTextColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    statusText,
+                    style: TextStyle(
+                      color: lightTextColor.withValues(alpha: 0.7),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          // Debug info - always show sample count and detection rate
+          const SizedBox(height: 8),
+          Text(
+            'Total: $sampleCount samples | Detections: $_styleChangeCount',
+            style: TextStyle(
+              color: lightTextColor.withValues(alpha: 0.5),
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getStyleIcon(String style) {
+    switch (style.toLowerCase()) {
+      case 'freestyle':
+        return Icons.pool;
+      case 'backstroke':
+        return Icons.airline_seat_flat;
+      case 'breaststroke':
+        return Icons.air;
+      case 'butterfly':
+        return Icons.waves;
+      case 'notswimming':
+        return Icons.pause_circle_outline;
+      case 'unknown':
+        return Icons.help_outline;
+      case 'rest':
+        return Icons.pause_circle_outline;
+      case 'transition':
+        return Icons.shuffle;
+      case 'detecting...':
+        return Icons.search;
+      default:
+        return Icons.help_outline;
+    }
+  }
 
   Widget _buildStopwatch(BuildContext context) {
     final hours = seconds ~/ 3600;

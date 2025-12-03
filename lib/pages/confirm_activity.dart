@@ -21,6 +21,8 @@ class ConfirmActivityPage extends StatefulWidget {
   final int strokes;
   final List<Map<String, dynamic>>? sensorData;
   final List<Map<String, dynamic>>? segments;
+  final String? detectedStyle;
+  final double? styleConfidence;
 
   const ConfirmActivityPage({
     super.key,
@@ -29,6 +31,8 @@ class ConfirmActivityPage extends StatefulWidget {
     required this.strokes,
     this.sensorData,
     this.segments,
+    this.detectedStyle,
+    this.styleConfidence,
   });
 
   @override
@@ -41,8 +45,15 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
   );
   final TextEditingController _notesController = TextEditingController();
   bool _submitting = false;
+  String? _selectedStyle;
 
   SupabaseClient get supabase => Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedStyle = widget.detectedStyle;
+  }
 
   @override
   void dispose() {
@@ -461,6 +472,120 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
             color: lightTextColor,
             fontSize: 22,
             fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetectedStyleSection() {
+    final styles = ['freestyle', 'backstroke', 'breaststroke', 'butterfly'];
+    final confidencePercent = ((widget.styleConfidence ?? 0) * 100).toStringAsFixed(0);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.pool, color: accentColor, size: 20),
+            const SizedBox(width: 8),
+            const Text(
+              'Detected Swimming Style',
+              style: TextStyle(
+                color: lightTextColor,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: primaryColor.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: primaryColor.withValues(alpha: 0.3)),
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'AI Detected: ${widget.detectedStyle?.toUpperCase() ?? 'UNKNOWN'}',
+                    style: const TextStyle(
+                      color: lightTextColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accentColor.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '$confidencePercent%',
+                      style: const TextStyle(
+                        color: accentColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Override if needed:',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: styles.map((style) {
+                  final isSelected = _selectedStyle == style;
+                  final isDetected = widget.detectedStyle == style;
+
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedStyle = style;
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? primaryColor
+                            : (isDetected
+                                ? accentColor.withValues(alpha: 0.3)
+                                : Colors.white12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isSelected
+                              ? primaryColor
+                              : (isDetected ? accentColor : Colors.white24),
+                          width: 2,
+                        ),
+                      ),
+                      child: Text(
+                        style.toUpperCase(),
+                        style: TextStyle(
+                          color: isSelected || isDetected
+                              ? lightTextColor
+                              : Colors.white60,
+                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
           ),
         ),
       ],
