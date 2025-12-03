@@ -3,9 +3,7 @@ import 'package:iconify_flutter/iconify_flutter.dart';
 import 'package:iconify_flutter/icons/fa_solid.dart';
 import 'package:iconify_flutter/icons/ep.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../widgets/animated_result_dialog.dart'; 
-// Import RecordPage jika Anda ingin menggunakan Navigator.pushReplacement
-// import 'record_page.dart';
+import '../widgets/animated_result_dialog.dart';
 
 // --- Konstanta Warna ---
 const Color primaryColor = Color(0xFF1976D2);
@@ -77,15 +75,15 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
-          await AnimatedResultDialog.show(
-            context: context,
-            isSuccess: false,
-            title: 'Authentication Required',
-            message: 'Please sign in to continue',
-            onClose: () {
-              Navigator.pushReplacementNamed(context, '/signin');
-            },
-          );
+        await AnimatedResultDialog.show(
+          context: context,
+          isSuccess: false,
+          title: 'Authentication Required',
+          message: 'Please sign in to continue',
+          onClose: () {
+            Navigator.pushReplacementNamed(context, '/signin');
+          },
+        );
         return;
       }
 
@@ -95,16 +93,16 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
       final totalTimeInterval = _formatInterval(widget.durationSeconds);
       final paceInterval = _calculatePaceInterval();
 
-      final primaryStyle = widget.segments != null
+      final primaryStyle = widget.segments != null && widget.segments!.isNotEmpty
           ? _determinePrimaryStyle()
-          : 'freestyle';
+          : (_selectedStyle ?? 'freestyle');
 
       final activityPayload = {
         'id_user': user.id,
         'total_distance': widget.distance.round(),
         'total_time': totalTimeInterval,
         'swimming_style': primaryStyle,
-        'confidence': 0.85,
+        'confidence': widget.styleConfidence ?? 0.85,
         'calories': _calculateCalories(),
         'timestamp': now.toIso8601String(),
         'start_time': startTime.toIso8601String(),
@@ -125,6 +123,7 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
 
       final activityId = activityResponse['id_activity'] as String;
 
+      // Insert segments dengan style yang benar
       if (widget.segments != null && widget.segments!.isNotEmpty) {
         await _insertSegments(activityId);
       }
@@ -166,6 +165,11 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     for (var i = 0; i < widget.segments!.length; i++) {
       final segment = widget.segments![i];
       final segmentDuration = segment['duration'] as int;
+      
+      // Ambil style dari segment, atau gunakan detected style, atau default freestyle
+      final segmentStyle = segment['style']?.toString().toLowerCase() ?? 
+                          widget.detectedStyle?.toLowerCase() ?? 
+                          'freestyle';
 
       final distanceProportion = segmentDuration / widget.durationSeconds;
       final segmentDistance = (widget.distance * distanceProportion).round();
@@ -187,7 +191,7 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
       segmentsList.add({
         'id_activity': activityId,
         'seq': i + 1,
-        'style': segment['style'],
+        'style': segmentStyle, // Pastikan style tersimpan dengan benar
         'distance': adjustedDistance,
         'strokes': adjustedStrokes,
         'segment_time': segmentTimeInterval,
@@ -197,6 +201,7 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
 
     if (segmentsList.isNotEmpty) {
       await supabase.from('activity_segments').insert(segmentsList);
+      debugPrint('Inserted ${segmentsList.length} segments with styles');
     }
   }
 
@@ -212,15 +217,29 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
 
   String _determinePrimaryStyle() {
     if (widget.segments == null || widget.segments!.isEmpty) {
-      return 'freestyle';
+      return _selectedStyle ?? 'freestyle';
     }
 
-    final uniqueStyles = widget.segments!.map((s) => s['style'] as String).toSet();
-    if (uniqueStyles.length > 1) {
+    // Hitung durasi total per style
+    final Map<String, int> styleDurations = {};
+    
+    for (var segment in widget.segments!) {
+      final style = segment['style']?.toString().toLowerCase() ?? 'freestyle';
+      final duration = segment['duration'] as int;
+      styleDurations[style] = (styleDurations[style] ?? 0) + duration;
+    }
+
+    // Jika hanya ada 1 style, return style tersebut
+    if (styleDurations.length == 1) {
+      return styleDurations.keys.first;
+    }
+
+    // Jika lebih dari 1 style, return 'Mixed'
+    if (styleDurations.length > 1) {
       return 'Mixed';
     }
 
-    return uniqueStyles.first;
+    return _selectedStyle ?? 'freestyle';
   }
 
   int _calculateCalories() {
@@ -244,12 +263,11 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black, // Set background
+      backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: GestureDetector(
-          // Navigasi Back Button AppBar mengikuti Cancel Button
           onTap: _submitting ? null : () => Navigator.pushReplacementNamed(context, '/record'),
           child: const Padding(
             padding: EdgeInsets.all(12.0),
@@ -270,7 +288,6 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
               ),
             ),
           ),
-          // Overlay gelap untuk keterbacaan
           Container(
             color: darkOverlayColor,
           ),
@@ -279,12 +296,10 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
               child: Container(
                 padding: const EdgeInsets.all(24),
-                // Card background gelap
                 decoration: BoxDecoration(
                   color: cardBgColor,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
-                    // Shadow yang lebih menonjol
                     BoxShadow(
                       color: primaryColor.withValues(alpha: 0.3),
                       blurRadius: 15,
@@ -309,7 +324,6 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
                     ),
                     const SizedBox(height: 30),
 
-                    // TextField Title
                     TextField(
                       controller: _titleController,
                       style: const TextStyle(color: Colors.black87),
@@ -331,7 +345,6 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
                     ),
                     const SizedBox(height: 24),
 
-                    // Stats Row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
@@ -341,7 +354,6 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
                       ],
                     ),
 
-                    // Segments (Hanya ditampilkan jika ada)
                     if (widget.segments != null && widget.segments!.isNotEmpty) ...[
                       const SizedBox(height: 24),
                       const Text(
@@ -353,35 +365,74 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      ...widget.segments!.map((segment) => Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
-                        decoration: BoxDecoration(
-                          color: primaryColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              (segment['style'].toString().toUpperCase()),
-                              style: const TextStyle(
-                                color: lightTextColor,
-                                fontWeight: FontWeight.w600,
+                      ...widget.segments!.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final segment = entry.value;
+                        final style = segment['style']?.toString() ?? 'Unknown';
+                        final duration = segment['duration'] as int;
+                        
+                        // Hitung distance untuk segment ini
+                        final distanceProportion = duration / widget.durationSeconds;
+                        final segmentDistance = (widget.distance * distanceProportion).round();
+                        
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
+                          decoration: BoxDecoration(
+                            color: _getStyleColor(style).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _getStyleColor(style).withValues(alpha: 0.5),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: _getStyleColor(style),
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    style.toUpperCase(),
+                                    style: const TextStyle(
+                                      color: lightTextColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            Text(
-                              _formatDuration(segment['duration'] as int),
-                              style: const TextStyle(color: Colors.white70),
-                            ),
-                          ],
-                        ),
-                      )),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    _formatDuration(duration),
+                                    style: const TextStyle(color: Colors.white70),
+                                  ),
+                                  Text(
+                                    '${segmentDistance}m',
+                                    style: const TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                     ],
 
                     const SizedBox(height: 24),
 
-                    // Notes Field
                     TextField(
                       controller: _notesController,
                       maxLines: 4,
@@ -404,7 +455,6 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
                     ),
                     const SizedBox(height: 30),
 
-                    // Tombol Submit
                     ElevatedButton(
                       onPressed: _submitting ? null : _submit,
                       style: ElevatedButton.styleFrom(
@@ -418,25 +468,24 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
                       ),
                       child: _submitting
                           ? const SizedBox(
-                        height: 24,
-                        width: 24,
-                        child: CircularProgressIndicator(
-                          color: lightTextColor,
-                          strokeWidth: 3,
-                        ),
-                      )
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                color: lightTextColor,
+                                strokeWidth: 3,
+                              ),
+                            )
                           : const Text(
-                        'Submit',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: lightTextColor,
-                        ),
-                      ),
+                              'Submit',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: lightTextColor,
+                              ),
+                            ),
                     ),
                     const SizedBox(height: 12),
                     TextButton(
-                      // PERUBAHAN: Menggunakan pushReplacementNamed untuk mengarahkan ke /record
                       onPressed: _submitting ? null : () => Navigator.pushReplacementNamed(context, '/record'),
                       child: const Text(
                         'Cancel',
@@ -456,7 +505,6 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     );
   }
 
-  // Widget pembantu untuk Stat Column
   Widget _buildStatColumn(String label, String value) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -478,117 +526,24 @@ class _ConfirmActivityPageState extends State<ConfirmActivityPage> {
     );
   }
 
-  Widget _buildDetectedStyleSection() {
-    final styles = ['freestyle', 'backstroke', 'breaststroke', 'butterfly'];
-    final confidencePercent = ((widget.styleConfidence ?? 0) * 100).toStringAsFixed(0);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.pool, color: accentColor, size: 20),
-            const SizedBox(width: 8),
-            const Text(
-              'Detected Swimming Style',
-              style: TextStyle(
-                color: lightTextColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: primaryColor.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: primaryColor.withValues(alpha: 0.3)),
-          ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'AI Detected: ${widget.detectedStyle?.toUpperCase() ?? 'UNKNOWN'}',
-                    style: const TextStyle(
-                      color: lightTextColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      '$confidencePercent%',
-                      style: const TextStyle(
-                        color: accentColor,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Override if needed:',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: styles.map((style) {
-                  final isSelected = _selectedStyle == style;
-                  final isDetected = widget.detectedStyle == style;
-
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedStyle = style;
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? primaryColor
-                            : (isDetected
-                                ? accentColor.withValues(alpha: 0.3)
-                                : Colors.white12),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: isSelected
-                              ? primaryColor
-                              : (isDetected ? accentColor : Colors.white24),
-                          width: 2,
-                        ),
-                      ),
-                      child: Text(
-                        style.toUpperCase(),
-                        style: TextStyle(
-                          color: isSelected || isDetected
-                              ? lightTextColor
-                              : Colors.white60,
-                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
+  // Helper function untuk mendapatkan warna berdasarkan style
+  Color _getStyleColor(String style) {
+    switch (style.toLowerCase()) {
+      case 'freestyle':
+        return Colors.blue;
+      case 'backstroke':
+        return Colors.purple;
+      case 'breaststroke':
+        return Colors.green;
+      case 'butterfly':
+        return Colors.orange;
+      case 'not swimming':
+      case 'notswimming':
+      case 'rest':
+      case 'idle':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
   }
 }
