@@ -14,18 +14,16 @@ const Color primaryColor = Color(0xFF1976D2);
 const Color accentColor = Color(0xFF4FC3F7);
 const Color lightTextColor = Colors.white;
 const Color darkBgColor = Colors.black;
-const Color warningColor = Color(0xFFFF5500); // Oranye/Merah untuk aksi Stop
+const Color warningColor = Color(0xFFFF5500);
 
-// ==================== RESPONSIVE HELPERS (Tailwind-like) ====================
+// ==================== RESPONSIVE HELPERS ====================
 class AppBreakpoints {
-  static const double sm = 640; // small -> mobile large
-  static const double md = 768; // medium -> tablet portrait
-  static const double lg = 1024; // large -> tablet landscape / small desktop
-  static const double xl = 1280; // extra large -> desktop
+  static const double sm = 640;
+  static const double md = 768;
+  static const double lg = 1024;
+  static const double xl = 1280;
 }
 
-/// Helper to pick a value based on screen width, similar to tailwind responsive utils.
-/// Provide at least [sm]. md, lg, xl are optional fallbacks.
 T responsive<T>({
   required BuildContext context,
   required T sm,
@@ -51,40 +49,32 @@ class RecordPage extends StatefulWidget {
 class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   // ==================== STATE VARIABLES ====================
 
-  // Recording state
   bool isRecording = false;
   bool isPaused = false;
   int seconds = 0;
 
-  // Activity metrics
   int strokes = 0;
   double distance = 0.0;
 
-  // Timers
   Timer? _mainTimer;
   Timer? _sensorTimer;
 
-  // Sensor data
   StreamSubscription<AccelerometerEvent>? _accelSubscription;
   StreamSubscription<GyroscopeEvent>? _gyroSubscription;
   AccelerometerEvent? _lastAccelEvent;
   GyroscopeEvent? _lastGyroEvent;
   final List<Map<String, dynamic>> _sensorSamples = [];
 
-  // Stroke detection
   double _lastAccelMagnitude = 0.0;
   int _lastStrokeTimestamp = 0;
 
-  // GPS tracking
   StreamSubscription<Position>? _positionSubscription;
   Position? _lastPosition;
 
-  // Animations
   late AnimationController _animController;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
 
-  // Swimming style detection
   String _currentDetectedStyle = 'Detecting...';
   double _styleConfidence = 0.0;
   String _previousDetectedStyle = '';
@@ -93,8 +83,11 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   final _styleDetector = SwimmingStyleDetector.instance;
   bool _isModelReady = false;
 
-  // ==================== LIFECYCLE METHODS ====================
-
+  // ==================== SEGMENT TRACKING ====================
+  final List<Map<String, dynamic>> _segments = [];
+  int _currentSegmentStartTime = 0; // dalam detik
+  String _currentSegmentStyle = '';
+  
   @override
   void initState() {
     super.initState();
@@ -107,8 +100,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     _disposeResources();
     super.dispose();
   }
-
-  // ==================== INITIALIZATION ====================
 
   void _initializeAnimations() {
     _animController = AnimationController(
@@ -159,8 +150,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     _positionSubscription?.cancel();
   }
 
-  // ==================== GPS STATUS ====================
-
   Future<void> _updateGpsStatus() async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -185,11 +174,50 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     }
   }
 
-  // ==================== SWIMMING STYLE SEGMENT TRACKING (DIHAPUS) ====================
-  // Semua fungsionalitas style tracking dihapus dari sini
+  // ==================== SEGMENT MANAGEMENT ====================
+  
+  void _startNewSegment(String style) {
+    _currentSegmentStartTime = seconds;
+    _currentSegmentStyle = style;
+    debugPrint('📍 Started new segment: $style at ${seconds}s');
+  }
 
-  void _finalizeSegments() {
-    // Tidak ada segment yang difinalisasi lagi
+  void _finalizeCurrentSegment() {
+    if (_currentSegmentStyle.isEmpty) return;
+    
+    final duration = seconds - _currentSegmentStartTime;
+    
+    // Hanya simpan segment jika durasinya > 0
+    if (duration > 0) {
+      _segments.add({
+        'style': _currentSegmentStyle,
+        'duration': duration,
+        'startTime': _currentSegmentStartTime,
+        'endTime': seconds,
+      });
+      
+      debugPrint('✅ Finalized segment: $_currentSegmentStyle, duration: ${duration}s (${_currentSegmentStartTime}s - ${seconds}s)');
+    }
+  }
+
+  void _handleStyleChange(String newStyle) {
+    // Jika ini adalah deteksi pertama
+    if (_currentSegmentStyle.isEmpty) {
+      _startNewSegment(newStyle);
+      return;
+    }
+
+    // Jika style berubah
+    if (newStyle != _currentSegmentStyle) {
+      // Finalisasi segment sebelumnya
+      _finalizeCurrentSegment();
+      
+      // Mulai segment baru
+      _startNewSegment(newStyle);
+      
+      _styleChangeCount++;
+      debugPrint('🔄 Style changed: $_currentSegmentStyle → $newStyle (change #$_styleChangeCount)');
+    }
   }
 
   // ==================== RECORDING CONTROLS ====================
@@ -200,6 +228,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       isPaused = false;
       _styleChangeCount = 0;
       _previousDetectedStyle = '';
+      _segments.clear();
+      _currentSegmentStyle = '';
+      _currentSegmentStartTime = 0;
     });
 
     _startMainTimer();
@@ -231,7 +262,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   void _stopRecording() {
-    _finalizeSegments(); // Sekarang hanya fungsi kosong
+    // Finalisasi segment terakhir sebelum stop
+    _finalizeCurrentSegment();
 
     final recordedSeconds = seconds;
     final recordedDistance = distance;
@@ -239,6 +271,13 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     final recordedSensors = List<Map<String, dynamic>>.from(_sensorSamples);
     final detectedStyle = _currentDetectedStyle;
     final styleConfidence = _styleConfidence;
+    final recordedSegments = List<Map<String, dynamic>>.from(_segments);
+
+    debugPrint('🛑 Stopping recording with ${recordedSegments.length} segments:');
+    for (var i = 0; i < recordedSegments.length; i++) {
+      final seg = recordedSegments[i];
+      debugPrint('   Segment ${i + 1}: ${seg['style']} - ${seg['duration']}s (${seg['startTime']}s - ${seg['endTime']}s)');
+    }
 
     _mainTimer?.cancel();
     _sensorTimer?.cancel();
@@ -257,6 +296,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       _lastPosition = null;
       _currentDetectedStyle = 'Detecting...';
       _styleConfidence = 0.0;
+      _segments.clear();
+      _currentSegmentStyle = '';
     });
 
     if (mounted) {
@@ -268,6 +309,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
             distance: recordedDistance,
             strokes: recordedStrokes,
             sensorData: recordedSensors,
+            segments: recordedSegments.isNotEmpty ? recordedSegments : null,
             detectedStyle: detectedStyle,
             styleConfidence: styleConfidence,
           ),
@@ -275,8 +317,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       );
     }
   }
-
-  // ==================== TIMER MANAGEMENT ====================
 
   void _startMainTimer() {
     _mainTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -290,8 +330,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       }
     });
   }
-
-  // ==================== SENSOR TRACKING ====================
 
   void _startSensorTracking() {
     _sensorSamples.clear();
@@ -340,10 +378,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         'gy': gy,
         'gz': gz,
       });
-      
-      // Keep collecting samples without limit - store all data until stop is pressed
-      // This allows continuous detection throughout the entire session
-      // No removal of old samples - we want the complete recording
     });
   }
 
@@ -353,8 +387,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         (now - _lastStrokeTimestamp) > debounceMs;
   }
 
-  // ==================== SWIMMING STYLE DETECTION ====================
-
   void _startStyleDetection() {
     if (!_isModelReady) {
       debugPrint('⚠️ Cannot start style detection: model not ready');
@@ -363,7 +395,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
 
     debugPrint('🏁 Starting continuous style detection');
 
-    // First detection after 2.5 seconds (enough time to collect 50 samples at 50ms interval)
     Future.delayed(const Duration(milliseconds: 2500), () {
       if (isRecording && !isPaused && mounted) {
         debugPrint('⏰ First detection triggered');
@@ -371,7 +402,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       }
     });
 
-    // Then detect style every 1.5 seconds for continuous real-time updates
     _styleDetectionTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
       if (!isPaused && mounted && isRecording) {
         debugPrint('⏰ Continuous detection triggered');
@@ -387,47 +417,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     
     if (totalSamples >= SwimmingStyleDetector.windowSize) {
       final startTime = DateTime.now();
-      debugPrint('🔍 Detection #${_styleChangeCount + 1} - Processing last 40 of $totalSamples total samples (${(totalSamples * 0.05).toStringAsFixed(1)}s recorded)');
-      
-      // Show some sample data for debugging
-      if (_sensorSamples.isNotEmpty) {
-        final recentSamples = _sensorSamples.length > 40 
-            ? _sensorSamples.sublist(_sensorSamples.length - 40)
-            : _sensorSamples;
-            
-        final firstSample = recentSamples.first;
-        final lastSample = recentSamples.last;
-        debugPrint('   Using samples from index ${_sensorSamples.length - recentSamples.length} to ${_sensorSamples.length - 1}');
-        debugPrint('   First: ax=${firstSample['ax']?.toStringAsFixed(2)}, ay=${firstSample['ay']?.toStringAsFixed(2)}, az=${firstSample['az']?.toStringAsFixed(2)}');
-        debugPrint('   Last: ax=${lastSample['ax']?.toStringAsFixed(2)}, ay=${lastSample['ay']?.toStringAsFixed(2)}, az=${lastSample['az']?.toStringAsFixed(2)}');
-        
-        // Calculate variance to check if data is changing
-        final axValues = recentSamples.map((s) => (s['ax'] ?? 0.0) as double).toList();
-        final ayValues = recentSamples.map((s) => (s['ay'] ?? 0.0) as double).toList();
-        final azValues = recentSamples.map((s) => (s['az'] ?? 0.0) as double).toList();
-        
-        final axMean = axValues.reduce((a, b) => a + b) / axValues.length;
-        final ayMean = ayValues.reduce((a, b) => a + b) / ayValues.length;
-        final azMean = azValues.reduce((a, b) => a + b) / azValues.length;
-        
-        final axVariance = axValues.map((v) => (v - axMean) * (v - axMean)).reduce((a, b) => a + b) / axValues.length;
-        final ayVariance = ayValues.map((v) => (v - ayMean) * (v - ayMean)).reduce((a, b) => a + b) / ayValues.length;
-        final azVariance = azValues.map((v) => (v - azMean) * (v - azMean)).reduce((a, b) => a + b) / azValues.length;
-        
-        debugPrint('   Variance: ax=${axVariance.toStringAsFixed(3)}, ay=${ayVariance.toStringAsFixed(3)}, az=${azVariance.toStringAsFixed(3)}');
-        
-        // Calculate some basic stats
-        final accelMags = recentSamples.map((s) {
-          final ax = s['ax'] ?? 0.0;
-          final ay = s['ay'] ?? 0.0;
-          final az = s['az'] ?? 0.0;
-          return math.sqrt(ax * ax + ay * ay + az * az);
-        }).toList();
-        final avgMag = accelMags.reduce((a, b) => a + b) / accelMags.length;
-        final maxMag = accelMags.reduce((a, b) => a > b ? a : b);
-        final minMag = accelMags.reduce((a, b) => a < b ? a : b);
-        debugPrint('   Magnitude: avg=${avgMag.toStringAsFixed(2)}, min=${minMag.toStringAsFixed(2)}, max=${maxMag.toStringAsFixed(2)}');
-      }
+      debugPrint('🔍 Detection #${_styleChangeCount + 1} - Processing last 40 of $totalSamples total samples');
       
       try {
         final result = await _styleDetector.detectStyleSmooth(_sensorSamples);
@@ -439,13 +429,9 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           final style = result['style'] as String;
           final confidence = result['confidence'] as double;
           
-          // Track style changes
-          if (_previousDetectedStyle.isNotEmpty && _previousDetectedStyle != style) {
-            _styleChangeCount++;
-            debugPrint('🔄 Style changed from $_previousDetectedStyle to $style (change #$_styleChangeCount)');
-          } else if (_previousDetectedStyle == style) {
-            debugPrint('✓ Style confirmed: $style (${(_styleConfidence * 100).toStringAsFixed(1)}% → ${(confidence * 100).toStringAsFixed(1)}%)');
-          }
+          // Handle segment tracking berdasarkan perubahan style
+          _handleStyleChange(style);
+          
           _previousDetectedStyle = style;
           
           setState(() {
@@ -455,7 +441,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           
           debugPrint('✅ Updated: $_currentDetectedStyle (${(_styleConfidence * 100).toStringAsFixed(1)}%)');
           
-          // Show all probabilities
           if (result.containsKey('probabilities')) {
             final probs = result['probabilities'] as Map<String, dynamic>;
             final sortedProbs = probs.entries.toList()
@@ -474,16 +459,11 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       }
     } else {
       debugPrint('⏳ Collecting data: $totalSamples/${SwimmingStyleDetector.windowSize} samples');
-      // Update UI to show collecting status
       if (mounted) {
-        setState(() {
-          // Force UI update to show collection progress
-        });
+        setState(() {});
       }
     }
   }
-
-  // ==================== GPS TRACKING ====================
 
   void _startGpsTracking() {
     Future.microtask(() async {
@@ -562,20 +542,16 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     }
   }
 
-  // ==================== UI BUILD METHODS ====================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: darkBgColor,
       appBar: const CustomNavbar(title: "Record"),
       extendBody: true,
-      // gunakan LayoutBuilder agar WaveBackground / body bisa menyesuaikan tinggi konten / layar
       body: LayoutBuilder(
         builder: (context, constraints) {
           return WaveBackground(
             child: SingleChildScrollView(
-              // pastikan tinggi minimum mengikuti layar agar footer bottom bar tidak overlap konten
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: IntrinsicHeight(
@@ -597,7 +573,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
   }
 
   Widget _buildBody(BuildContext context) {
-    // responsive spacing untuk seluruh layout
     final topPadding = responsive(
       context: context,
       sm: 24.0,
@@ -613,7 +588,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       lg: 40.0,
     );
 
-    // bottom spacing: gunakan safe area + sedikit ekstra yang responsive
     final bottomExtra = responsive(
       context: context,
       sm: 10.0,
@@ -629,19 +603,16 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           SizedBox(height: topPadding),
           _buildStopwatch(context),
           SizedBox(height: betweenLargeSections),
-          if (isRecording) _buildStyleIndicator(), // Show detected style during recording
+          if (isRecording) _buildStyleIndicator(),
           if (isRecording) SizedBox(height: betweenLargeSections / 2),
           _buildMetrics(),
           SizedBox(height: betweenLargeSections),
           _buildActionButton(),
-          // ruang bawah yang proporsional agar tidak terlalu besar
           SizedBox(height: MediaQuery.of(context).padding.bottom + bottomExtra),
         ],
       ),
     );
   }
-
-  // Indicator Swimming Style DIHAPUS
 
   Widget _buildStyleIndicator() {
     final styleIcon = _getStyleIcon(_currentDetectedStyle);
@@ -649,9 +620,8 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     final isDetecting = _currentDetectedStyle == 'Detecting...' || !_isModelReady;
     final sampleCount = _sensorSamples.length;
     final minSamples = SwimmingStyleDetector.windowSize;
-    final duration = (sampleCount * 0.05).toStringAsFixed(1); // 50ms per sample
+    final duration = (sampleCount * 0.05).toStringAsFixed(1);
     
-    // Build status text
     String statusText = '';
     if (!_isModelReady) {
       statusText = 'Loading model...';
@@ -660,7 +630,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     } else if (_currentDetectedStyle == 'Detecting...') {
       statusText = 'Analyzing ${duration}s of data...';
     } else {
-      statusText = 'Confidence: $confidencePercent% | ${duration}s';
+      statusText = 'Confidence: $confidencePercent% | Segments: ${_segments.length + 1}';
     }
 
     return Container(
@@ -709,15 +679,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
               ),
             ],
           ),
-          // Debug info - always show sample count and detection rate
-          const SizedBox(height: 8),
-          Text(
-            'Total: $sampleCount samples | Detections: $_styleChangeCount',
-            style: TextStyle(
-              color: lightTextColor.withValues(alpha: 0.5),
-              fontSize: 10,
-            ),
-          ),
         ],
       ),
     );
@@ -734,6 +695,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       case 'butterfly':
         return Icons.waves;
       case 'notswimming':
+      case 'not swimming':
         return Icons.pause_circle_outline;
       case 'unknown':
         return Icons.help_outline;
@@ -765,7 +727,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
           '${secs.toString().padLeft(2, '0')}';
     }
 
-    // responsive font size for stopwatch
     final fontSize = responsive(
       context: context,
       sm: 72.0,
@@ -873,7 +834,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       width: size,
       height: size,
       child: _roundButton(
-        color: primaryColor, // START: Warna Biru Utama
+        color: primaryColor,
         icon: Icons.play_arrow_rounded,
         onPressed: _startRecording,
         iconSize: responsive(context: context, sm: 44.0, md: 48.0, lg: 52.0),
@@ -889,23 +850,21 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Tombol Resume
           SizedBox(
             width: smallSize,
             height: smallSize,
             child: _roundButton(
-              color: primaryColor, // RESUME: Warna Biru Utama
+              color: primaryColor,
               icon: Icons.play_arrow_rounded,
               onPressed: _resumeRecording,
               iconSize: responsive(context: context, sm: 32.0, md: 36.0, lg: 40.0),
             ),
           ),
-          // Tombol Stop
           SizedBox(
             width: smallSize,
             height: smallSize,
             child: _roundButton(
-              color: warningColor, // STOP: Warna Oranye/Merah
+              color: warningColor,
               icon: Icons.stop_rounded,
               onPressed: _stopRecording,
               iconSize: responsive(context: context, sm: 32.0, md: 36.0, lg: 40.0),
@@ -923,7 +882,7 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
       width: size,
       height: size,
       child: _roundButton(
-        color: accentColor, // PAUSE: Warna Biru Muda/Aksen
+        color: accentColor,
         icon: Icons.pause_rounded,
         onPressed: _pauseRecording,
         iconSize: responsive(context: context, sm: 44.0, md: 48.0, lg: 52.0),
@@ -942,9 +901,6 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
     );
   }
 
-  // ==================== CUSTOM BUTTON WIDGETS (Disederhanakan) ====================
-
-  // Tombol Lingkaran Konsisten untuk semua aksi
   Widget _roundButton({
     required Color color,
     required IconData icon,
@@ -956,14 +912,13 @@ class _RecordPageState extends State<RecordPage> with TickerProviderStateMixin {
         backgroundColor: color,
         shape: const CircleBorder(),
         padding: const EdgeInsets.all(10),
-        // beri sedikit shadow agar menempel di atas wave bg
         elevation: 6,
       ),
       onPressed: onPressed,
       child: Icon(
         icon,
         size: iconSize,
-        color: lightTextColor, // Ikon selalu putih
+        color: lightTextColor,
       ),
     );
   }
