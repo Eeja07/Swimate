@@ -17,11 +17,10 @@ print("Num GPUs Available:", len(tf.config.list_physical_devices('GPU')))
 # Settings
 # ===========================
 DATA_DIR = "dataset"
-SAMPLING_HZ = 10      # Hz
-WINDOW_SEC = 4        # 4-second windows
-WINDOW_SIZE = int(SAMPLING_HZ * WINDOW_SEC)
+SAMPLING_HZ = 10
+WINDOW_SEC = 4
+WINDOW_SIZE = SAMPLING_HZ * WINDOW_SEC
 STRIDE = WINDOW_SIZE // 2
-
 GAUSSIAN_STD = 0.05
 MAG_SCALE_STD = 0.1
 EPOCHS = 60
@@ -94,6 +93,7 @@ print("Loaded raw sequences:", len(seqs))
 # ===========================
 # Encode labels
 # ===========================
+# Map any label not in fixed_classes to "not swimming"
 fixed_classes_full = ["freestyle", "backstroke", "breaststroke", "butterfly", "not swimming"]
 lbls_fixed = [l if l in fixed_classes_full else "not swimming" for l in lbls]
 
@@ -101,8 +101,9 @@ encoder = LabelEncoder()
 labels_enc = encoder.fit_transform(lbls_fixed)
 np.save(os.path.join(run_dir, "labels.npy"), encoder.classes_)
 
+
 # ===========================
-# Window known classes
+# Window sequences
 # ===========================
 X_list, y_list = [], []
 for seq, lbl in zip(seqs, labels_enc):
@@ -115,7 +116,7 @@ y = np.array(y_list)
 print("Known-class windows:", X.shape)
 
 # ===========================
-# Generate UNKNOWN windows
+# Generate unknown “not swimming” windows
 # ===========================
 def generate_unknown(X_known, num=400):
     unknown = []
@@ -130,14 +131,14 @@ def generate_unknown(X_known, num=400):
     return np.array(unknown)
 
 unknown_windows = generate_unknown(X, num=500)
-unknown_idx = np.where(encoder.classes_ == "not swimming")[0][0]
+not_swimming_idx = np.where(encoder.classes_ == "not swimming")[0][0]
 
 X = np.concatenate([X, unknown_windows], axis=0)
-y = np.concatenate([y, np.full(len(unknown_windows), unknown_idx)])
+y = np.concatenate([y, np.full(len(unknown_windows), not_swimming_idx)])
 print("Total windows after NOT SWIMMING added:", X.shape)
 
 # ===========================
-# Train/val split
+# Train/validation split
 # ===========================
 X_train, X_val, y_train, y_val = train_test_split(
     X, y, test_size=0.2, stratify=y, random_state=42
@@ -220,13 +221,12 @@ history = model.fit(
 )
 
 # ===========================
-# Save models
+# Save Keras & convert to TFLite
 # ===========================
 keras_model_path = os.path.join(run_dir, "model.h5")
-model.save(keras_model_path, save_format="h5")
+model.save(keras_model_path)
 print(f"[INFO] Saved Keras model to {keras_model_path}")
 
-# TFLite conversion
 tflite_model_path = os.path.join(run_dir, "model.tflite")
 converter = tf.lite.TFLiteConverter.from_keras_model(model)
 tflite_model = converter.convert()
@@ -235,14 +235,12 @@ with open(tflite_model_path, "wb") as f:
 print(f"[INFO] Converted TFLite model saved to {tflite_model_path}")
 
 # ===========================
-# Confusion matrix (5-class)
+# Confusion matrix
 # ===========================
-fixed_classes = ["freestyle", "backstroke", "breaststroke", "butterfly", "not swimming"]
-class_map = {name: i for i, name in enumerate(fixed_classes)}
-
-y_val_mapped = np.array([class_map[encoder.classes_[i]] if encoder.classes_[i] in class_map else class_map["not swimming"] for i in y_val])
+class_map = {name: i for i, name in enumerate(fixed_classes_full)}
+y_val_mapped = np.array([class_map[encoder.classes_[i]] for i in y_val])
 preds = np.argmax(model.predict(X_val), axis=1)
-preds_mapped = np.array([class_map[encoder.classes_[i]] if encoder.classes_[i] in class_map else class_map["not swimming"] for i in preds])
+preds_mapped = np.array([class_map[encoder.classes_[i]] for i in preds])
 
 cm = confusion_matrix(y_val_mapped, preds_mapped)
 cm_pct = cm.astype(float) / cm.sum(axis=1, keepdims=True) * 100
@@ -250,9 +248,9 @@ cm_pct = cm.astype(float) / cm.sum(axis=1, keepdims=True) * 100
 plt.figure(figsize=(8,6))
 plt.imshow(cm_pct, cmap="Blues", vmin=0, vmax=100)
 plt.colorbar(label="Correct (%)")
-ticks = np.arange(len(fixed_classes))
-plt.xticks(ticks, fixed_classes, rotation=45)
-plt.yticks(ticks, fixed_classes)
+ticks = np.arange(len(fixed_classes_full))
+plt.xticks(ticks, fixed_classes_full, rotation=45)
+plt.yticks(ticks, fixed_classes_full)
 
 for i in range(cm_pct.shape[0]):
     for j in range(cm_pct.shape[1]):
